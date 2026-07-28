@@ -5,6 +5,10 @@ import Testing
 
 @Suite(.serialized)
 struct ClaudeDebugDiagnosticsTests {
+    private enum StubError: Error {
+        case failed
+    }
+
     private func makeCredentialsData(
         accessToken: String,
         expiresAt: Date,
@@ -457,5 +461,77 @@ struct ClaudeDebugDiagnosticsTests {
 
         #expect(first.contains("planner_selected=cli"))
         #expect(second.contains("planner_selected=none"))
+    }
+
+    @Test
+    func `debug log reports cooldown for selected Claude profile only`() async throws {
+        let service = "com.steipete.codexbar.cache.tests.\(UUID().uuidString)"
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        var selectedEnvironment = ProcessInfo.processInfo.environment
+        selectedEnvironment["CLAUDE_CONFIG_DIR"] = tempDir.path
+        let configuration = UsageStore.ClaudeDebugLogConfiguration(
+            runtime: .app,
+            sourceMode: .auto,
+            environment: selectedEnvironment,
+            webExtrasEnabled: false,
+            usageDataSource: .auto,
+            cookieSource: .off,
+            cookieHeader: "",
+            keepCLISessionsAlive: false)
+        let touchAuthPath: @Sendable (TimeInterval, [String: String]) async throws -> Void = { _, _ in
+            throw StubError.failed
+        }
+        let keychainFingerprint: @Sendable () -> ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint? = { nil }
+
+        let text = await ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
+            await ClaudeOAuthDelegatedRefreshCoordinator.withIsolatedStateForTesting {
+                ClaudeOAuthDelegatedRefreshCoordinator.resetForTesting()
+                defer { ClaudeOAuthDelegatedRefreshCoordinator.resetForTesting() }
+
+                _ = await ClaudeOAuthDelegatedRefreshCoordinator.withCLIAvailableOverrideForTesting(true) {
+                    await ClaudeOAuthDelegatedRefreshCoordinator.withKeychainFingerprintOverrideForTesting(
+                        keychainFingerprint)
+                    {
+                        try? await ClaudeOAuthDelegatedRefreshCoordinator
+                            .withTouchAuthPathOverrideForTesting(touchAuthPath) {
+                                await ProviderInteractionContext.$current.withValue(.userInitiated) {
+                                    await ClaudeOAuthDelegatedRefreshCoordinator.attempt(
+                                        timeout: 0.01,
+                                        environment: ProcessInfo.processInfo.environment)
+                                }
+                            }
+                    }
+                }
+
+                return await ClaudeCLIResolver.withResolvedBinaryPathOverrideForTesting(
+                    "/definitely/missing/claude")
+                {
+                    await KeychainCacheStore.withServiceOverrideForTesting(service) {
+                        KeychainCacheStore.setTestStoreForTesting(true)
+                        defer { KeychainCacheStore.setTestStoreForTesting(false) }
+
+                        return await ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
+                            await ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
+                                await ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
+                                    await ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                                        data: nil,
+                                        fingerprint: nil)
+                                    {
+                                        await UsageStore.debugClaudeLog(
+                                            browserDetection: BrowserDetection(cacheTTL: 0),
+                                            configuration: configuration)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        #expect(text.contains("delegatedRefreshCooldownActive=false"))
+        #expect(!text.contains("delegatedRefreshCooldownSeconds="))
     }
 }

@@ -69,7 +69,8 @@ extension UsageStore {
                 sourceMode: configuration.sourceMode,
                 environment: configuration.environment)
             let hasClaudeBinary = ClaudeCLIResolver.isAvailable(environment: configuration.environment)
-            let delegatedCooldownSeconds = ClaudeOAuthDelegatedRefreshCoordinator.cooldownRemainingSeconds()
+            let delegatedCooldownSeconds = ClaudeOAuthDelegatedRefreshCoordinator.cooldownRemainingSeconds(
+                environment: configuration.environment)
             let planningInput = ClaudeSourcePlanningInput(
                 runtime: configuration.runtime,
                 selectedDataSource: configuration.usageDataSource,
