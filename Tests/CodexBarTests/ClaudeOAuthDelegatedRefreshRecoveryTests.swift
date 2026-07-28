@@ -58,7 +58,7 @@ struct ClaudeOAuthDelegatedRefreshRecoveryTests {
     }
 
     @Test
-    func `silent keychain repair recovers without delegation`() async throws {
+    func `ambient keychain data requires attributed delegation before recovery`() async throws {
         let delegatedCounter = AsyncCounter()
         let usageResponse = try Self.makeOAuthUsageResponse()
         let tokenCapture = TokenCapture()
@@ -125,9 +125,11 @@ struct ClaudeOAuthDelegatedRefreshRecoveryTests {
                                     Date,
                                     TimeInterval,
                                     [String: String]) async -> ClaudeOAuthDelegatedRefreshCoordinator.Outcome)? =
-                                    { _, _, _ in
+                                    { _, _, environment in
                                         _ = await delegatedCounter.increment()
-                                        return .attemptedSucceeded
+                                        let didSync = ClaudeOAuthCredentialsStore
+                                            .syncFromClaudeKeychainAfterDelegatedRefresh(environment: environment)
+                                        return didSync ? .attemptedSucceededAndSynced : .attemptedSucceeded
                                     }
 
                                 let snapshot = try await ClaudeOAuthKeychainPromptPreference
@@ -148,11 +150,9 @@ struct ClaudeOAuthDelegatedRefreshRecoveryTests {
                                         }
                                     }
 
-                                // If Claude keychain already contains fresh credentials, we should recover without
-                                // needing a
-                                // CLI
-                                // touch.
-                                #expect(await delegatedCounter.current() == 0)
+                                // Even when the global item is already fresh, it has no profile identity. Recovery
+                                // must first enter the serialized, profile-attributed delegated operation.
+                                #expect(await delegatedCounter.current() == 1)
                                 #expect(await tokenCapture.get() == "fresh-token")
                                 #expect(snapshot.primary.usedPercent == 7)
                                 #expect(snapshot.secondary?.usedPercent == 21)

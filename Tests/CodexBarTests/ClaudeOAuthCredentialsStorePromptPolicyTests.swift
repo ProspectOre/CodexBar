@@ -116,7 +116,7 @@ struct ClaudeOAuthCredentialsStorePromptPolicyTests {
     }
 
     @Test
-    func `can read claude keychain on user action when prompt mode only on user action`() throws {
+    func `user action without explicit prompt cannot import ambient keychain`() throws {
         let service = "com.steipete.codexbar.cache.tests.\(UUID().uuidString)"
         try KeychainCacheStore.withServiceOverrideForTesting(service) {
             try KeychainAccessGate.withTaskOverrideForTesting(false) {
@@ -136,7 +136,7 @@ struct ClaudeOAuthCredentialsStorePromptPolicyTests {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 let fileURL = tempDir.appendingPathComponent("credentials.json")
 
-                try ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(fileURL) {
+                ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(fileURL) {
                     ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeTrackingForTesting()
 
                     let fingerprint = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
@@ -147,18 +147,22 @@ struct ClaudeOAuthCredentialsStorePromptPolicyTests {
                         accessToken: "keychain-token",
                         expiresAt: Date(timeIntervalSinceNow: 3600))
 
-                    let creds = try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                        try ProviderInteractionContext.$current.withValue(.userInitiated) {
-                            try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
-                                data: keychainData,
-                                fingerprint: fingerprint)
-                            {
-                                try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                    let error = #expect(throws: ClaudeOAuthCredentialsError.self) {
+                        try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                            try ProviderInteractionContext.$current.withValue(.userInitiated) {
+                                try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                                    data: keychainData,
+                                    fingerprint: fingerprint)
+                                {
+                                    try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                                }
                             }
                         }
                     }
-
-                    #expect(creds.accessToken == "keychain-token")
+                    guard case .notFound = error else {
+                        Issue.record("Expected .notFound, got \(String(describing: error))")
+                        return
+                    }
                 }
             }
         }

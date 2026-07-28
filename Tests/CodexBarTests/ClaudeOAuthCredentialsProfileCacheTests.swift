@@ -193,7 +193,7 @@ struct ClaudeOAuthCredentialsProfileCacheTests {
                             try ClaudeOAuthCredentialsStore.loadRecord(
                                 environment: environmentB,
                                 allowKeychainPrompt: false,
-                                allowClaudeKeychainRepairWithoutPrompt: false)
+                                allowClaudeKeychainRepairWithoutPrompt: true)
                         }
                     }
                 }
@@ -215,6 +215,47 @@ struct ClaudeOAuthCredentialsProfileCacheTests {
                 case .missing, .invalid, .temporarilyUnavailable:
                     Issue.record("Expected profile cache for \(identifier)")
                 }
+            }
+        }
+    }
+
+    @Test
+    func `cache miss never attributes an ambient global keychain item to a profile`() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let environmentB = ["CLAUDE_CONFIG_DIR": root.appendingPathComponent("profile-b").path]
+        let identifierB = self.profileIdentifier(environment: environmentB)
+        let globalKeychainData = self.makeCredentialsData(accessToken: "profile-a-token")
+
+        try self.withIsolatedCache {
+            let error = #expect(throws: ClaudeOAuthCredentialsError.self) {
+                try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.always) {
+                    try ProviderInteractionContext.$current.withValue(.userInitiated) {
+                        try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                            data: globalKeychainData,
+                            fingerprint: nil)
+                        {
+                            try ClaudeOAuthCredentialsStore.loadRecord(
+                                environment: environmentB,
+                                allowKeychainPrompt: false,
+                                allowClaudeKeychainRepairWithoutPrompt: true)
+                        }
+                    }
+                }
+            }
+            guard case .notFound = error else {
+                Issue.record("Expected .notFound, got \(String(describing: error))")
+                return
+            }
+
+            switch KeychainCacheStore.load(
+                key: ClaudeOAuthCredentialsStore.cacheKeyForTesting(profileIdentifier: identifierB),
+                as: ClaudeOAuthCredentialsStore.CacheEntry.self)
+            {
+            case .missing:
+                break
+            case .found, .invalid, .temporarilyUnavailable:
+                Issue.record("Ambient global credentials must not seed the requested profile cache")
             }
         }
     }

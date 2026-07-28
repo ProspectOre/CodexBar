@@ -924,14 +924,17 @@ extension UsageStore {
         }
     }
 
-    // MARK: - Active Claude account corroboration (~/.claude.json)
+    // MARK: - Active Claude account corroboration
 
-    /// The currently-active Claude account UUID, read prompt-free from `~/.claude.json`. This is the only
+    /// The currently-active Claude account UUID, read prompt-free from the selected profile's account config. This is
+    /// the only
     /// always-fresh, never-gated signal of the active account on a background poll: Claude Code's `/login`
-    /// updates the Keychain item in place and leaves `~/.claude/.credentials.json` stale, but immediately
-    /// rewrites `oauthAccount.accountUuid` in this sibling plain file. Returns nil on absence/corruption.
-    nonisolated static func activeClaudeAccountUuid() -> String? {
-        ClaudeActiveAccountProbe.activeClaudeAccountUuid()
+    /// updates the Keychain item in place and can leave `.credentials.json` stale, but immediately rewrites
+    /// `oauthAccount.accountUuid` in this plain file. Returns nil on absence/corruption.
+    nonisolated static func activeClaudeAccountUuid(
+        environment: [String: String] = ProcessInfo.processInfo.environment) -> String?
+    {
+        ClaudeActiveAccountProbe.activeClaudeAccountUuid(environment: environment)
     }
 
     /// Persisted `historyOwnerIdentifier -> hashed active account identity` bindings.
@@ -1080,8 +1083,10 @@ extension UsageStore {
         }
     }
 
-    nonisolated static func activeClaudeAccountIdentity() -> String? {
-        self.activeClaudeAccountUuid().map(self.claudeAccountIdentity)
+    nonisolated static func activeClaudeAccountIdentity(
+        environment: [String: String] = ProcessInfo.processInfo.environment) -> String?
+    {
+        self.activeClaudeAccountUuid(environment: environment).map(self.claudeAccountIdentity)
     }
 
     private nonisolated static func claudeAccountIdentity(_ uuid: String) -> String {
@@ -1639,9 +1644,9 @@ actor PlanUtilizationHistoryPersistenceCoordinator {
     }
 }
 
-/// Prompt-free reader for the active Claude account UUID recorded in `~/.claude.json`. The `@TaskLocal` test
-/// seam lives here (not on `UsageStore`) because Swift forbids stored properties in extensions and task-local
-/// storage must be nonisolated, whereas `UsageStore` is `@MainActor`.
+/// Prompt-free reader for the active Claude account UUID recorded in the selected profile's account config. The
+/// `@TaskLocal` test seam lives here (not on `UsageStore`) because Swift forbids stored properties in extensions and
+/// task-local storage must be nonisolated, whereas `UsageStore` is `@MainActor`.
 private enum ClaudeActiveAccountProbe {
     #if DEBUG
     enum Override: Sendable {
@@ -1659,18 +1664,13 @@ private enum ClaudeActiveAccountProbe {
         let oauthAccount: OAuthAccount?
     }
 
-    static func activeClaudeAccountUuid() -> String? {
+    static func activeClaudeAccountUuid(environment: [String: String]) -> String? {
         #if DEBUG
         if case let .value(uuid) = self.activeClaudeAccountUuidOverrideForTesting {
             return uuid
         }
         #endif
-        // `~/.claude.json` is a SIBLING of `.claude/`, not inside it. Home resolution mirrors
-        // `ClaudeOAuthCredentials.defaultCredentialsURL()`. This intentionally does NOT honor
-        // CLAUDE_CONFIG_DIR: the credential store that yields `historyOwnerIdentifier` is purely
-        // home-relative, so the accountUuid corroboration must resolve against the same home or the
-        // two signals would point at different accounts.
-        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+        let url = ClaudeConfigPaths.accountConfigURL(environment: environment)
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode(ClaudeConfigAccount.self, from: data),
               let uuid = decoded.oauthAccount?.accountUuid?.trimmingCharacters(in: .whitespacesAndNewlines),

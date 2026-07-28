@@ -340,12 +340,12 @@ extension UsageStore {
         }
 
         self.diagnostics[provider] = nil
+        let fetchContext = self.makeFetchContext(provider: provider, override: nil)
         let claudeAuthStateBeforeFetch = provider == .claude
-            ? await Self.captureClaudeRefreshAuthState(invalidateCredentialsFile: true)
+            ? await Self.captureClaudeRefreshAuthState(environment: fetchContext.env)
             : nil
         let tokenAccount = self.settings.effectiveSelectedTokenAccount(for: provider)
         let priorTokenAccountSnapshot = self.tokenAccountSnapshot(provider: provider, account: tokenAccount)
-        let fetchContext = self.makeFetchContext(provider: provider, override: nil)
         let descriptor = spec.descriptor
         let codexResetCreditsFetcher = self.codexResetCreditsFetcher()
         let previousCodexSnapshot = codexPreparation?.previousSnapshot
@@ -412,14 +412,14 @@ extension UsageStore {
             outcome = initialOutcome
         }
         let claudeHistoryAccountState = provider == .claude
-            ? await Self.captureClaudeHistoryAccountState()
+            ? await Self.captureClaudeHistoryAccountState(environment: fetchContext.env)
             : nil
         let claudeAuthFingerprintAfterFetch = claudeHistoryAccountState?.fingerprintToken
         let claudeAuthChangedDuringFetch = Self.claudeAuthChangedDuringFetch(
             provider: provider,
             beforeFetch: claudeAuthStateBeforeFetch,
             afterFetchFingerprintToken: claudeAuthFingerprintAfterFetch)
-        await Self.invalidateClaudeCredentialsFileCacheIfNeeded(changedDuringFetch: claudeAuthChangedDuringFetch)
+        await Self.invalidateClaudeFileCacheIfNeeded(claudeAuthChangedDuringFetch, environment: fetchContext.env)
         let claudeCredentialsChanged = Self.claudeCredentialsChanged(
             beforeFetch: claudeAuthStateBeforeFetch,
             changedDuringFetch: claudeAuthChangedDuringFetch)
@@ -813,22 +813,21 @@ extension UsageStore {
     }
 
     private nonisolated static func captureClaudeRefreshAuthState(
-        invalidateCredentialsFile: Bool) async -> ClaudeRefreshAuthState
+        environment: [String: String]) async -> ClaudeRefreshAuthState
     {
         await withTaskGroup(of: ClaudeRefreshAuthState.self, returning: ClaudeRefreshAuthState.self) { group in
             group.addTask {
-                let credentialsFileChanged = invalidateCredentialsFile
-                    ? ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged()
-                    : false
+                let credentialsFileChanged = ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged(
+                    environment: environment)
                 let keychainFingerprintChanged = ClaudeOAuthCredentialsStore
                     .claudeKeychainFingerprintChangedWithoutConsuming()
-                let fingerprintBefore = ClaudeOAuthCredentialsStore.authFingerprintToken()
+                let fingerprintBefore = ClaudeOAuthCredentialsStore.authFingerprintToken(environment: environment)
                 let persistentRefBefore = ClaudeOAuthCredentialsStore
                     .claudeKeychainPersistentRefHashWithoutPrompt()
-                let activeAccountIdentity = Self.activeClaudeAccountIdentity()
+                let activeAccountIdentity = Self.activeClaudeAccountIdentity(environment: environment)
                 let persistentRefAfter = ClaudeOAuthCredentialsStore
                     .claudeKeychainPersistentRefHashWithoutPrompt()
-                let fingerprintAfter = ClaudeOAuthCredentialsStore.authFingerprintToken()
+                let fingerprintAfter = ClaudeOAuthCredentialsStore.authFingerprintToken(environment: environment)
                 let accountStateWasStable = fingerprintBefore == fingerprintAfter
                     && persistentRefBefore == persistentRefAfter
                 return ClaudeRefreshAuthState(
@@ -843,16 +842,18 @@ extension UsageStore {
         }
     }
 
-    private nonisolated static func captureClaudeHistoryAccountState() async -> ClaudeHistoryAccountState {
+    private nonisolated static func captureClaudeHistoryAccountState(
+        environment: [String: String]) async -> ClaudeHistoryAccountState
+    {
         await withTaskGroup(of: ClaudeHistoryAccountState.self, returning: ClaudeHistoryAccountState.self) { group in
             group.addTask {
-                let fingerprintBefore = ClaudeOAuthCredentialsStore.authFingerprintToken()
+                let fingerprintBefore = ClaudeOAuthCredentialsStore.authFingerprintToken(environment: environment)
                 let persistentRefBefore = ClaudeOAuthCredentialsStore
                     .claudeKeychainPersistentRefHashWithoutPrompt()
-                let activeAccountIdentity = Self.activeClaudeAccountIdentity()
+                let activeAccountIdentity = Self.activeClaudeAccountIdentity(environment: environment)
                 let persistentRefAfter = ClaudeOAuthCredentialsStore
                     .claudeKeychainPersistentRefHashWithoutPrompt()
-                let fingerprintAfter = ClaudeOAuthCredentialsStore.authFingerprintToken()
+                let fingerprintAfter = ClaudeOAuthCredentialsStore.authFingerprintToken(environment: environment)
                 let wasStable = fingerprintBefore == fingerprintAfter && persistentRefBefore == persistentRefAfter
                 return ClaudeHistoryAccountState(
                     fingerprintToken: fingerprintAfter,
@@ -939,18 +940,23 @@ extension UsageStore {
     }
     #endif
 
-    private nonisolated static func invalidateClaudeCredentialsFileCacheIfChanged() async -> Bool {
+    private nonisolated static func invalidateClaudeCredentialsFileCacheIfChanged(
+        environment: [String: String]) async -> Bool
+    {
         await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
             group.addTask {
-                ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged()
+                ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged(environment: environment)
             }
             return await group.next()!
         }
     }
 
-    private nonisolated static func invalidateClaudeCredentialsFileCacheIfNeeded(changedDuringFetch: Bool) async {
+    private nonisolated static func invalidateClaudeFileCacheIfNeeded(
+        _ changedDuringFetch: Bool,
+        environment: [String: String]) async
+    {
         guard changedDuringFetch else { return }
-        _ = await self.invalidateClaudeCredentialsFileCacheIfChanged()
+        _ = await self.invalidateClaudeCredentialsFileCacheIfChanged(environment: environment)
     }
 
     private nonisolated static func consumeClaudeKeychainFingerprintChangeWithoutPrompt() async -> Bool {
