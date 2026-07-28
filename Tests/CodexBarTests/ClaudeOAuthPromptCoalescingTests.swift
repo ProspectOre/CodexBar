@@ -88,6 +88,22 @@ struct ClaudeOAuthPromptCoalescingTests {
         #expect(state.readCount == 2)
         #expect(Set([records.0.credentials.accessToken, records.1.credentials.accessToken]) ==
             Set(["profile-prompt-1", "profile-prompt-2"]))
+
+        for profileIdentifier in ["prompt-profile-a", "prompt-profile-b"] {
+            let key = ClaudeOAuthCredentialsStore.cacheKeyForTesting(profileIdentifier: profileIdentifier)
+            switch KeychainCacheStore.load(key: key, as: ClaudeOAuthCredentialsStore.CacheEntry.self) {
+            case .missing:
+                break
+            case .found, .invalid, .temporarilyUnavailable:
+                Issue.record("Interactive global credentials must not be persisted under \(profileIdentifier)")
+            }
+
+            let hasCachedCredentials = ClaudeOAuthCredentialsStore
+                .withCredentialsProfileIdentifierOverrideForTesting(profileIdentifier) {
+                    ClaudeOAuthCredentialsStore.hasCachedCredentials(environment: [:])
+                }
+            #expect(hasCachedCredentials == false)
+        }
     }
 
     @Test

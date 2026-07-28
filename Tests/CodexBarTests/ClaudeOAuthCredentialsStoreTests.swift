@@ -954,7 +954,7 @@ struct ClaudeOAuthCredentialsStoreTests {
     }
 
     @Test
-    func `sync after delegated refresh respects backoff in background`() {
+    func `delegated recovery ignores an unattributed global keychain item`() {
         ProviderInteractionContext.$current.withValue(.background) {
             KeychainAccessGate.withTaskOverrideForTesting(true) {
                 ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
@@ -973,7 +973,7 @@ struct ClaudeOAuthCredentialsStoreTests {
                     ClaudeOAuthKeychainAccessGate.withDeniedUntilStoreOverrideForTesting(deniedStore) {
                         ClaudeOAuthCredentialsStore.withMutableClaudeKeychainOverrideStoreForTesting(store) {
                             #expect(ClaudeOAuthCredentialsStore
-                                .syncFromClaudeKeychainAfterDelegatedRefresh(now: Date()) == false)
+                                .syncFromSelectedProfileAfterDelegatedRefresh(now: Date()) == false)
                         }
                     }
                 }

@@ -113,7 +113,10 @@ public enum KeychainCacheStore {
         case .allowed:
             break
         case .interactionRequired:
-            return .temporarilyUnavailable
+            // The item exists, but its ACL cannot authorize this executable without UI. It is not a usable
+            // cache hit and must not suppress another credential source or an explicitly permitted recovery.
+            self.log.info("Keychain cache item is unusable by this executable (\(key.account)); treating as missing")
+            return .missing
         case .notFound:
             return .missing
         case let .failure(status):

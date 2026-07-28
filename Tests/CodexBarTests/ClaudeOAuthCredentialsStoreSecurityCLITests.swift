@@ -639,7 +639,7 @@ extension ClaudeOAuthCredentialsStoreSecurityCLITests {
     }
 
     @Test
-    func `experimental reader sync skips fingerprint probe after security CLI read`() {
+    func `delegated recovery ignores an unattributed security CLI read`() {
         let service = "com.steipete.codexbar.cache.tests.\(UUID().uuidString)"
         KeychainCacheStore.withServiceOverrideForTesting(service) {
             KeychainAccessGate.withTaskOverrideForTesting(false) {
@@ -674,8 +674,8 @@ extension ClaudeOAuthCredentialsStoreSecurityCLITests {
                                             ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(
                                                 .data(securityData))
                                             {
-                                                ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh(
-                                                    now: Date())
+                                                ClaudeOAuthCredentialsStore
+                                                    .syncFromSelectedProfileAfterDelegatedRefresh(now: Date())
                                             }
                                         }
                                     }
@@ -683,7 +683,7 @@ extension ClaudeOAuthCredentialsStoreSecurityCLITests {
                             }
                         })
 
-                    #expect(synced == true)
+                    #expect(synced == false)
                     #expect(fingerprintStore.fingerprint == nil)
                 }
             }

@@ -359,7 +359,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     @Test
     func `replacement store failure after successful clear keeps tombstone and cache missing`() throws {
         try self.withTestState { state in
-            try self.withCredentialsFile(data: nil) { _ in
+            try self.withCredentialsFile(data: nil) { fileURL in
                 self.seedCache(state, accessToken: "cached-token")
                 ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.never) {
                     ClaudeOAuthCredentialsStore.invalidateCache()
@@ -369,6 +369,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                     accessToken: "sync-token",
                     expiresAt: Date(timeIntervalSinceNow: 3600),
                     refreshToken: "sync-refresh-token")
+                try syncData.write(to: fileURL, options: .atomic)
                 let synced = KeychainCacheStore.withStoreFailureStatusOverrideForTesting(
                     errSecInteractionNotAllowed)
                 {
@@ -379,7 +380,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                                     data: syncData,
                                     fingerprint: nil)
                                 {
-                                    ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh()
+                                    ClaudeOAuthCredentialsStore.syncFromSelectedProfileAfterDelegatedRefresh()
                                 }
                             }
                         }
@@ -398,7 +399,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     @Test
     func `failed clear preserves the tombstone and stale cache without replacement`() throws {
         try self.withTestState { state in
-            try self.withCredentialsFile(data: nil) { _ in
+            try self.withCredentialsFile(data: nil) { fileURL in
                 self.seedCache(state, accessToken: "cached-token")
                 ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.never) {
                     ClaudeOAuthCredentialsStore.invalidateCache()
@@ -408,6 +409,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                     accessToken: "sync-token",
                     expiresAt: Date(timeIntervalSinceNow: 3600),
                     refreshToken: "sync-refresh-token")
+                try syncData.write(to: fileURL, options: .atomic)
                 let synced = KeychainCacheStore.withClearFailureStatusOverrideForTesting(
                     errSecInteractionNotAllowed)
                 {
@@ -418,7 +420,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                                     data: syncData,
                                     fingerprint: nil)
                                 {
-                                    ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh()
+                                    ClaudeOAuthCredentialsStore.syncFromSelectedProfileAfterDelegatedRefresh()
                                 }
                             }
                         }

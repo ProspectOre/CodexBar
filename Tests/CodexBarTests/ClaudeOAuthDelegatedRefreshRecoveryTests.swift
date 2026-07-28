@@ -58,107 +58,55 @@ struct ClaudeOAuthDelegatedRefreshRecoveryTests {
     }
 
     @Test
-    func `ambient keychain data requires attributed delegation before recovery`() async throws {
-        let delegatedCounter = AsyncCounter()
-        let usageResponse = try Self.makeOAuthUsageResponse()
-        let tokenCapture = TokenCapture()
+    func `external global keychain change is not attributed to selected profile`() throws {
         let service = "com.steipete.codexbar.cache.tests.\(UUID().uuidString)"
 
-        try await KeychainCacheStore.withServiceOverrideForTesting(service) {
-            try await KeychainAccessGate.withTaskOverrideForTesting(false) {
+        try KeychainCacheStore.withServiceOverrideForTesting(service) {
+            try KeychainAccessGate.withTaskOverrideForTesting(false) {
                 KeychainCacheStore.setTestStoreForTesting(true)
                 defer { KeychainCacheStore.setTestStoreForTesting(false) }
 
-                ClaudeOAuthCredentialsStore._resetCredentialsFileTrackingForTesting()
-                defer { ClaudeOAuthCredentialsStore._resetCredentialsFileTrackingForTesting() }
-                ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeTrackingForTesting()
-                defer { ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeTrackingForTesting() }
-
-                try await ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
-                    try await ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
+                try ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
+                    try ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
                         let tempDir = FileManager.default.temporaryDirectory
                             .appendingPathComponent(UUID().uuidString, isDirectory: true)
                         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                        defer { try? FileManager.default.removeItem(at: tempDir) }
                         let fileURL = tempDir.appendingPathComponent("credentials.json")
-                        let snapshot = try await ClaudeOAuthCredentialsStore
-                            .withCredentialsURLOverrideForTesting(fileURL) {
-                                // Seed an expired cache entry owned by Claude CLI, so the initial load delegates
-                                // refresh.
-                                ClaudeOAuthCredentialsStore.invalidateCache()
-                                let expiredData = self.makeCredentialsData(
-                                    accessToken: "expired-token",
-                                    expiresAt: Date(timeIntervalSinceNow: -3600))
-                                let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
-                                let cacheEntry = ClaudeOAuthCredentialsStore.CacheEntry(
-                                    data: expiredData,
-                                    storedAt: Date(),
-                                    owner: .claudeCLI)
-                                KeychainCacheStore.store(key: cacheKey, entry: cacheEntry)
-                                defer { KeychainCacheStore.clear(key: cacheKey) }
 
-                                // Sanity: setup should be visible to the code under test.
-                                // Otherwise it may attempt interactive reads.
-                                #expect(ClaudeOAuthCredentialsStore.hasCachedCredentials(environment: [:]) == true)
-
-                                // Simulate Claude CLI writing fresh credentials into the Claude Code keychain entry.
-                                let freshData = self.makeCredentialsData(
-                                    accessToken: "fresh-token",
-                                    expiresAt: Date(timeIntervalSinceNow: 3600))
-                                let fingerprint = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                                    modifiedAt: 1,
-                                    createdAt: 1,
-                                    persistentRefHash: "test")
-
-                                let fetcher = ClaudeUsageFetcher(
-                                    browserDetection: BrowserDetection(cacheTTL: 0),
-                                    environment: [:],
-                                    dataSource: .oauth,
-                                    oauthKeychainPromptCooldownEnabled: true)
-
-                                let fetchOverride: @Sendable (
-                                    String,
-                                    Bool) async throws -> OAuthUsageResponse = { token, _ in
-                                    await tokenCapture.set(token)
-                                    return usageResponse
-                                }
-                                let delegatedOverride: (@Sendable (
-                                    Date,
-                                    TimeInterval,
-                                    [String: String]) async -> ClaudeOAuthDelegatedRefreshCoordinator.Outcome)? =
-                                    { _, _, environment in
-                                        _ = await delegatedCounter.increment()
-                                        let didSync = ClaudeOAuthCredentialsStore
-                                            .syncFromClaudeKeychainAfterDelegatedRefresh(environment: environment)
-                                        return didSync ? .attemptedSucceededAndSynced : .attemptedSucceeded
-                                    }
-
-                                let snapshot = try await ClaudeOAuthKeychainPromptPreference
-                                    .withTaskOverrideForTesting(.onlyOnUserAction) {
-                                        try await ProviderInteractionContext.$current.withValue(.userInitiated) {
-                                            try await ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
-                                                data: freshData,
-                                                fingerprint: fingerprint)
-                                            {
-                                                try await ClaudeUsageFetcher.$fetchOAuthUsageOverride
-                                                    .withValue(fetchOverride) {
-                                                        try await ClaudeUsageFetcher.$delegatedRefreshAttemptOverride
-                                                            .withValue(delegatedOverride) {
-                                                                try await fetcher.loadLatestUsage(model: "sonnet")
-                                                            }
-                                                    }
-                                            }
-                                        }
-                                    }
-
-                                // Even when the global item is already fresh, it has no profile identity. Recovery
-                                // must first enter the serialized, profile-attributed delegated operation.
-                                #expect(await delegatedCounter.current() == 1)
-                                #expect(await tokenCapture.get() == "fresh-token")
-                                #expect(snapshot.primary.usedPercent == 7)
-                                #expect(snapshot.secondary?.usedPercent == 21)
-                                return snapshot
+                        ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(fileURL) {
+                            ClaudeOAuthCredentialsStore.invalidateCache()
+                            let freshData = self.makeCredentialsData(
+                                accessToken: "external-profile-token",
+                                expiresAt: Date(timeIntervalSinceNow: 3600))
+                            let fingerprint = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
+                                modifiedAt: 1,
+                                createdAt: 1,
+                                persistentRefHash: "test")
+                            let didSync = ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                                data: freshData,
+                                fingerprint: fingerprint)
+                            {
+                                ClaudeOAuthCredentialsStore.syncFromSelectedProfileAfterDelegatedRefresh(
+                                    environment: [:])
                             }
-                        _ = snapshot
+
+                            #expect(didSync == false)
+                            let profileIdentifier = ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                                environment: [:])
+                            let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                                profileIdentifier: profileIdentifier)
+                            switch KeychainCacheStore.load(
+                                key: cacheKey,
+                                as: ClaudeOAuthCredentialsStore.CacheEntry.self)
+                            {
+                            case .missing:
+                                break
+                            case .found, .invalid, .temporarilyUnavailable:
+                                Issue.record("Expected the unattributed global credential to remain unpersisted")
+                            }
+                            #expect(ClaudeOAuthCredentialsStore.hasCachedCredentials(environment: [:]) == false)
+                        }
                     }
                 }
             }
@@ -166,7 +114,7 @@ struct ClaudeOAuthDelegatedRefreshRecoveryTests {
     }
 
     @Test
-    func `delegated refresh attempted succeeded recovers after keychain sync`() async throws {
+    func `delegated refresh attempted succeeded recovers after selected file sync`() async throws {
         let delegatedCounter = AsyncCounter()
         let usageResponse = try Self.makeOAuthUsageResponse()
         let tokenCapture = TokenCapture()
@@ -238,13 +186,15 @@ struct ClaudeOAuthDelegatedRefreshRecoveryTests {
                                     TimeInterval,
                                     [String: String]) async -> ClaudeOAuthDelegatedRefreshCoordinator.Outcome)? =
                                     { _, _, environment in
-                                        // Simulate Claude CLI writing fresh credentials after the delegated refresh
-                                        // touch.
-                                        keychainOverrideStore.data = freshData
-                                        keychainOverrideStore.fingerprint = stubFingerprint
+                                        // Simulate Claude CLI writing fresh credentials to the selected profile.
+                                        do {
+                                            try freshData.write(to: fileURL, options: .atomic)
+                                        } catch {
+                                            return .attemptedFailed(error.localizedDescription)
+                                        }
                                         _ = await delegatedCounter.increment()
                                         let didSync = ClaudeOAuthCredentialsStore
-                                            .syncFromClaudeKeychainAfterDelegatedRefresh(environment: environment)
+                                            .syncFromSelectedProfileAfterDelegatedRefresh(environment: environment)
                                         return didSync ? .attemptedSucceededAndSynced : .attemptedSucceeded
                                     }
 

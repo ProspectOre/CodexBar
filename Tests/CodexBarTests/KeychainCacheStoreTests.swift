@@ -168,7 +168,7 @@ struct KeychainCacheStoreTests {
 
     #if os(macOS)
     @Test
-    func `cache secret read stops when attributes preflight requires interaction`() {
+    func `unsafe cache ACL is unusable for credential planning`() {
         let service = "cache-preflight-\(UUID().uuidString)"
         let key = KeychainCacheStore.Key(category: "test", identifier: UUID().uuidString)
         let observed = LockIsolated<(String, String?)?>(nil)
@@ -191,10 +191,10 @@ struct KeychainCacheStoreTests {
         #expect(observed.value?.0 == service)
         #expect(observed.value?.1 == key.account)
         switch result {
-        case .temporarilyUnavailable:
+        case .missing:
             break
-        case .found, .missing, .invalid:
-            Issue.record("Expected preflight to block the secret-data query")
+        case .found, .invalid, .temporarilyUnavailable:
+            Issue.record("Expected an unsafe cache item to behave as missing")
         }
     }
 

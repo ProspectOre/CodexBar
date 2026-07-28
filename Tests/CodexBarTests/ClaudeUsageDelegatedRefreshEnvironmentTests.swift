@@ -162,6 +162,10 @@ struct ClaudeUsageDelegatedRefreshEnvironmentTests {
         let environmentA = ["CLAUDE_CONFIG_DIR": root.appendingPathComponent("profile-a").path]
         let environmentB = ["CLAUDE_CONFIG_DIR": root.appendingPathComponent("profile-b").path]
         let syncedData = self.credentialsData(accessToken: "synced-profile-a-token")
+        let profileADirectory = root.appendingPathComponent("profile-a", isDirectory: true)
+        try FileManager.default.createDirectory(at: profileADirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try syncedData.write(to: profileADirectory.appendingPathComponent(".credentials.json"), options: .atomic)
         let loadOverride: CredentialLoader? = { environment, _, _ in
             #expect(environment == environmentA)
             throw ClaudeOAuthCredentialsError.refreshDelegatedToClaudeCLI
@@ -169,7 +173,7 @@ struct ClaudeUsageDelegatedRefreshEnvironmentTests {
         let delegatedOverride: (@Sendable (Date, TimeInterval, [String: String]) async
             -> ClaudeOAuthDelegatedRefreshCoordinator.Outcome)? = { _, _, environment in
             #expect(environment == environmentA)
-            let didSync = ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh(
+            let didSync = ClaudeOAuthCredentialsStore.syncFromSelectedProfileAfterDelegatedRefresh(
                 environment: environment)
             return didSync ? .attemptedSucceededAndSynced : .attemptedSucceeded
         }
@@ -195,7 +199,7 @@ struct ClaudeUsageDelegatedRefreshEnvironmentTests {
                                 {
                                     try await ProviderInteractionContext.$current.withValue(.userInitiated) {
                                         try await ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
-                                            data: syncedData,
+                                            data: self.credentialsData(accessToken: "unattributed-global-token"),
                                             fingerprint: nil)
                                         {
                                             try await ClaudeUsageFetcher.$hasCachedCredentialsOverride.withValue(true) {

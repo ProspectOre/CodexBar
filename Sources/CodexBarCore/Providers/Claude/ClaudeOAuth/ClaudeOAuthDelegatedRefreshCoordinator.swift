@@ -327,11 +327,11 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
         }
         #endif
 
-        // This invalidation and the following global-Keychain read must remain inside the serialized attempt.
-        // Another credentials profile cannot start its Claude CLI touch until this task returns.
+        // Reconcile only the selected profile's file while the attributed attempt is still serialized. A global
+        // Keychain change is insufficient because an external Claude process can update it concurrently.
         _ = ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged(
             environment: configuration.environment)
-        return ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh(
+        return ClaudeOAuthCredentialsStore.syncFromSelectedProfileAfterDelegatedRefresh(
             now: now,
             environment: configuration.environment)
     }
