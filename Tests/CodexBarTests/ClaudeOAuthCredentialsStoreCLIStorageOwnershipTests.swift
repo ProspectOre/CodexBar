@@ -105,7 +105,9 @@ struct ClaudeOAuthCredentialsStoreCLIStorageOwnershipTests {
                     try await ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(fileURL) {
                         try await ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
                             ClaudeOAuthCredentialsStore.invalidateCache()
-                            let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                            let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                                profileIdentifier: ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                                    environment: [:]))
                             defer { KeychainCacheStore.clear(key: cacheKey) }
 
                             let expiredData = self.makeCredentialsData(
@@ -214,12 +216,13 @@ struct ClaudeOAuthCredentialsStoreCLIStorageOwnershipTests {
             try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: tempDir) }
             let fileURL = tempDir.appendingPathComponent("credentials.json")
-            let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
-            defer { KeychainCacheStore.clear(key: cacheKey) }
-
             try await ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
                 try await ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(fileURL) {
                     try await ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
+                        let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                            profileIdentifier: ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                                environment: [:]))
+                        defer { KeychainCacheStore.clear(key: cacheKey) }
                         ClaudeOAuthCredentialsStore.invalidateCache()
                         let expiredData = self.makeCredentialsData(
                             accessToken: "access-before-rotation",
