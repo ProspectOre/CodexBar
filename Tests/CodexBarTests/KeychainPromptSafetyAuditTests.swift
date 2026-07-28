@@ -19,6 +19,14 @@ struct KeychainPromptSafetyAuditTests {
     }
 
     @Test
+    func `live Claude proof passes its explicit keychain consent`() throws {
+        let script = try Self.readRepoFile("Scripts/verify_1844_live.sh")
+
+        #expect(script.contains("LIVE_CLAUDE_KEYCHAIN_PROOF=1"))
+        #expect(script.contains("CODEXBAR_ALLOW_TEST_KEYCHAIN_ACCESS=1"))
+    }
+
+    @Test
     func `live TTY integration tests are opt in`() throws {
         let ttyTests = try Self.readRepoFile("Tests/CodexBarTests/TTYIntegrationTests.swift")
 
