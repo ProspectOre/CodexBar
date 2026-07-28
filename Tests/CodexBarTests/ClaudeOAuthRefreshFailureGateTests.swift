@@ -53,8 +53,10 @@ struct ClaudeOAuthRefreshFailureGateTests {
         UserDefaults.standard.set(0, forKey: self.legacyFailureCountKey)
         UserDefaults.standard.removeObject(forKey: self.terminalBlockedKey)
 
-        #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: now) == true)
-        #expect(UserDefaults.standard.object(forKey: self.legacyBlockedUntilKey) == nil)
+        ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
+            #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(environment: [:], now: now) == true)
+            #expect(UserDefaults.standard.object(forKey: self.legacyBlockedUntilKey) == nil)
+        }
     }
 
     @Test
@@ -70,21 +72,88 @@ struct ClaudeOAuthRefreshFailureGateTests {
                 createdAt: 1,
                 persistentRefHash: "ref1"),
             credentialsFile: "file1")
-        try ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
-            fingerprint
-        } operation: {
-            let legacyBlockedUntil = now.addingTimeInterval(60 * 10)
-            UserDefaults.standard.set(2, forKey: self.legacyFailureCountKey)
-            UserDefaults.standard.removeObject(forKey: self.terminalBlockedKey)
-            UserDefaults.standard.set(legacyBlockedUntil.timeIntervalSince1970, forKey: self.legacyBlockedUntilKey)
-            let data = try JSONEncoder().encode(fingerprint)
-            UserDefaults.standard.set(data, forKey: self.legacyFingerprintKey)
+        try ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
+            try ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
+                fingerprint
+            } operation: {
+                let historicalEnvironment: [String: String] = [:]
+                let legacyBlockedUntil = now.addingTimeInterval(60 * 10)
+                UserDefaults.standard.set(2, forKey: self.legacyFailureCountKey)
+                UserDefaults.standard.removeObject(forKey: self.terminalBlockedKey)
+                UserDefaults.standard.set(
+                    legacyBlockedUntil.timeIntervalSince1970,
+                    forKey: self.legacyBlockedUntilKey)
+                let data = try JSONEncoder().encode(fingerprint)
+                UserDefaults.standard.set(data, forKey: self.legacyFingerprintKey)
 
-            #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: now) == false)
-            #expect(UserDefaults.standard.bool(forKey: self.terminalBlockedKey) == false)
-            #expect(UserDefaults.standard.object(forKey: self.legacyBlockedUntilKey) == nil)
-            #expect(UserDefaults.standard.object(forKey: self.transientBlockedUntilKey) != nil)
-            #expect(UserDefaults.standard.integer(forKey: self.transientFailureCountKey) == 2)
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: historicalEnvironment,
+                    now: now) == false)
+                #expect(UserDefaults.standard.bool(forKey: self.terminalBlockedKey) == false)
+                #expect(UserDefaults.standard.object(forKey: self.legacyBlockedUntilKey) == nil)
+                #expect(UserDefaults.standard.object(forKey: ClaudeOAuthRefreshFailureGate
+                        .scopedPersistenceKeyForTesting(
+                            self.transientBlockedUntilKey,
+                            environment: historicalEnvironment)) != nil)
+                #expect(UserDefaults.standard.integer(forKey: ClaudeOAuthRefreshFailureGate
+                        .scopedPersistenceKeyForTesting(
+                            self.transientFailureCountKey,
+                            environment: historicalEnvironment)) == 2)
+            }
+        }
+    }
+
+    @Test
+    func `custom profile cannot claim historical unscoped refresh state`() throws {
+        ClaudeOAuthRefreshFailureGate.resetForTesting()
+        defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
+
+        let now = Date(timeIntervalSince1970: 22000)
+        let customRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClaudeOAuthRefreshFailureGate-custom-\(UUID().uuidString)", isDirectory: true)
+        let customEnvironment = ["CLAUDE_CONFIG_DIR": customRoot.path]
+        let historicalEnvironment: [String: String] = [:]
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
+            keychain: nil,
+            credentialsFile: "legacy-default-file")
+
+        try ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
+            #expect(ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(
+                environment: historicalEnvironment) ==
+                ClaudeOAuthCredentialsStore.historicalDefaultCredentialsProfileIdentifier)
+            #expect(ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(
+                environment: customEnvironment) != ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(
+                environment: historicalEnvironment))
+
+            UserDefaults.standard.set(2, forKey: self.legacyFailureCountKey)
+            UserDefaults.standard.set(
+                now.addingTimeInterval(600).timeIntervalSince1970,
+                forKey: self.legacyBlockedUntilKey)
+            try UserDefaults.standard.set(
+                JSONEncoder().encode(fingerprint),
+                forKey: self.legacyFingerprintKey)
+
+            ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
+                fingerprint
+            } operation: {
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: customEnvironment,
+                    now: now))
+                #expect(UserDefaults.standard.object(forKey: self.legacyBlockedUntilKey) != nil)
+                #expect(UserDefaults.standard.object(forKey: ClaudeOAuthRefreshFailureGate
+                        .scopedPersistenceKeyForTesting(
+                            self.transientBlockedUntilKey,
+                            environment: customEnvironment)) == nil)
+
+                #expect(!ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: historicalEnvironment,
+                    now: now))
+                #expect(UserDefaults.standard.object(forKey: self.legacyBlockedUntilKey) == nil)
+                #expect(UserDefaults.standard.object(forKey: ClaudeOAuthRefreshFailureGate
+                        .scopedPersistenceKeyForTesting(
+                            self.transientBlockedUntilKey,
+                            environment: historicalEnvironment)) != nil)
+            }
         }
     }
 
@@ -195,8 +264,8 @@ struct ClaudeOAuthRefreshFailureGateTests {
             ClaudeOAuthRefreshFailureGate.recordTransientFailure(now: start.addingTimeInterval(1))
 
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(20)) == false)
-            #expect(UserDefaults.standard.bool(forKey: self.terminalBlockedKey) == true)
-            #expect(UserDefaults.standard.object(forKey: self.transientBlockedUntilKey) == nil)
+            #expect(UserDefaults.standard.bool(forKey: self.scopedKey(self.terminalBlockedKey)) == true)
+            #expect(UserDefaults.standard.object(forKey: self.scopedKey(self.transientBlockedUntilKey)) == nil)
         }
     }
 
@@ -311,6 +380,99 @@ struct ClaudeOAuthRefreshFailureGateTests {
             // Even though the 5-minute cooldown window hasn't elapsed, a fingerprint change should unblock.
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(40)) == true)
         }
+    }
+
+    @Test
+    func `failure and success are isolated by HOME credential profile`() {
+        ClaudeOAuthRefreshFailureGate.resetForTesting()
+        defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClaudeOAuthRefreshFailureGate-home-\(UUID().uuidString)", isDirectory: true)
+        let profileA = ["HOME": root.appendingPathComponent("a", isDirectory: true).path]
+        let profileB = ["HOME": root.appendingPathComponent("b", isDirectory: true).path]
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
+            keychain: nil,
+            credentialsFile: "unchanged")
+        let start = Date(timeIntervalSince1970: 90000)
+
+        ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
+            ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
+                fingerprint
+            } operation: {
+                ClaudeOAuthRefreshFailureGate.recordTerminalAuthFailure(environment: profileA, now: start)
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: profileA,
+                    now: start.addingTimeInterval(20)) == false)
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: profileB,
+                    now: start.addingTimeInterval(20)) == true)
+
+                ClaudeOAuthRefreshFailureGate.recordTerminalAuthFailure(environment: profileB, now: start)
+                ClaudeOAuthRefreshFailureGate.recordSuccess(environment: profileA)
+
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: profileA,
+                    now: start.addingTimeInterval(40)) == true)
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: profileB,
+                    now: start.addingTimeInterval(40)) == false)
+            }
+        }
+    }
+
+    @Test
+    func `secure storage root overrides HOME for failure scope`() throws {
+        ClaudeOAuthRefreshFailureGate.resetForTesting()
+        defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClaudeOAuthRefreshFailureGate-secure-\(UUID().uuidString)", isDirectory: true)
+        let sharedSecureRoot = root.appendingPathComponent("secure-shared", isDirectory: true).path
+        let otherSecureRoot = root.appendingPathComponent("secure-other", isDirectory: true).path
+        let profileA = [
+            "HOME": root.appendingPathComponent("home-a", isDirectory: true).path,
+            ClaudeConfigPaths.secureStorageDirectoryEnvironmentKey: sharedSecureRoot,
+        ]
+        let sameCredentialProfile = [
+            "HOME": root.appendingPathComponent("home-b", isDirectory: true).path,
+            ClaudeConfigPaths.configDirectoryEnvironmentKey:
+                root.appendingPathComponent("config-b", isDirectory: true).path,
+            ClaudeConfigPaths.secureStorageDirectoryEnvironmentKey: sharedSecureRoot,
+        ]
+        let otherCredentialProfile = try [
+            "HOME": #require(profileA["HOME"]),
+            ClaudeConfigPaths.secureStorageDirectoryEnvironmentKey: otherSecureRoot,
+        ]
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
+            keychain: nil,
+            credentialsFile: "unchanged")
+        let start = Date(timeIntervalSince1970: 100_000)
+
+        ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
+            #expect(ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(environment: profileA) ==
+                ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(environment: sameCredentialProfile))
+            #expect(ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(environment: profileA) !=
+                ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(environment: otherCredentialProfile))
+
+            ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
+                fingerprint
+            } operation: {
+                ClaudeOAuthRefreshFailureGate.recordTransientFailure(environment: profileA, now: start)
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: sameCredentialProfile,
+                    now: start.addingTimeInterval(20)) == false)
+                #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: otherCredentialProfile,
+                    now: start.addingTimeInterval(20)) == true)
+            }
+        }
+    }
+
+    private func scopedKey(_ baseKey: String) -> String {
+        ClaudeOAuthRefreshFailureGate.scopedPersistenceKeyForTesting(
+            baseKey,
+            environment: ProcessInfo.processInfo.environment)
     }
 }
 #endif

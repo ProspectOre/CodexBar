@@ -564,7 +564,7 @@ struct ClaudeOAuthCredentialsStoreTests {
     }
 
     @Test
-    func `syncs cache when claude keychain fingerprint changes and token differs`() throws {
+    func `unattributed keychain change does not replace cached credentials`() throws {
         let service = "com.steipete.codexbar.cache.tests.\(UUID().uuidString)"
         try KeychainCacheStore.withServiceOverrideForTesting(service) {
             try KeychainAccessGate.withTaskOverrideForTesting(false) {
@@ -592,13 +592,20 @@ struct ClaudeOAuthCredentialsStoreTests {
                     // Avoid cross-suite interference from UserDefaults fingerprint persistence.
                     let fingerprintStore = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprintStore()
 
-                    let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                    let profileIdentifier = ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                        environment: [:])
+                    let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                        profileIdentifier: profileIdentifier)
                     let cachedData = self.makeCredentialsData(
                         accessToken: "cached-token",
                         expiresAt: Date(timeIntervalSinceNow: 3600))
                     KeychainCacheStore.store(
                         key: cacheKey,
-                        entry: ClaudeOAuthCredentialsStore.CacheEntry(data: cachedData, storedAt: Date()))
+                        entry: ClaudeOAuthCredentialsStore.CacheEntry(
+                            data: cachedData,
+                            storedAt: Date(),
+                            owner: .claudeCLI,
+                            profileIdentifier: profileIdentifier))
 
                     let fingerprint1 = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
                         modifiedAt: 1,
@@ -620,9 +627,7 @@ struct ClaudeOAuthCredentialsStoreTests {
                         }
                     }
                     #expect(first.accessToken == "cached-token")
-                    #expect(fingerprintStore.fingerprint == fingerprint1)
-
-                    ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeThrottleForTesting()
+                    #expect(fingerprintStore.fingerprint == nil)
 
                     let fingerprint2 = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
                         modifiedAt: 2,
@@ -647,13 +652,13 @@ struct ClaudeOAuthCredentialsStoreTests {
                             }
                         }
                     }
-                    #expect(second.accessToken == "keychain-token")
-                    #expect(fingerprintStore.fingerprint == fingerprint2)
+                    #expect(second.accessToken == "cached-token")
+                    #expect(fingerprintStore.fingerprint == nil)
 
                     switch KeychainCacheStore.load(key: cacheKey, as: ClaudeOAuthCredentialsStore.CacheEntry.self) {
                     case let .found(entry):
                         let parsed = try ClaudeOAuthCredentials.parse(data: entry.data)
-                        #expect(parsed.accessToken == "keychain-token")
+                        #expect(parsed.accessToken == "cached-token")
                     default:
                         #expect(Bool(false))
                     }
@@ -696,7 +701,10 @@ struct ClaudeOAuthCredentialsStoreTests {
                         persistentRefHash: "ref1")
                     fingerprintStore.fingerprint = fingerprint1
 
-                    let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                    let profileIdentifier = ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                        environment: [:])
+                    let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                        profileIdentifier: profileIdentifier)
                     let cachedData = self.makeCredentialsData(
                         accessToken: "cached-token",
                         expiresAt: Date(timeIntervalSinceNow: 3600))
@@ -705,9 +713,8 @@ struct ClaudeOAuthCredentialsStoreTests {
                         entry: ClaudeOAuthCredentialsStore.CacheEntry(
                             data: cachedData,
                             storedAt: Date(),
-                            owner: .claudeCLI))
-
-                    ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeThrottleForTesting()
+                            owner: .claudeCLI,
+                            profileIdentifier: profileIdentifier))
 
                     let fingerprint2 = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
                         modifiedAt: 2,
@@ -761,13 +768,20 @@ struct ClaudeOAuthCredentialsStoreTests {
                     ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeTrackingForTesting()
                 }
 
-                let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                let profileIdentifier = ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                    environment: [:])
+                let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                    profileIdentifier: profileIdentifier)
                 let cachedData = self.makeCredentialsData(
                     accessToken: "cached-token",
                     expiresAt: Date(timeIntervalSinceNow: 3600))
                 KeychainCacheStore.store(
                     key: cacheKey,
-                    entry: ClaudeOAuthCredentialsStore.CacheEntry(data: cachedData, storedAt: Date()))
+                    entry: ClaudeOAuthCredentialsStore.CacheEntry(
+                        data: cachedData,
+                        storedAt: Date(),
+                        owner: .claudeCLI,
+                        profileIdentifier: profileIdentifier))
 
                 let fingerprint = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
                     modifiedAt: 1,
@@ -781,7 +795,6 @@ struct ClaudeOAuthCredentialsStoreTests {
                     })
                 #expect(first.accessToken == "cached-token")
 
-                ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeThrottleForTesting()
                 let keychainData = self.makeCredentialsData(
                     accessToken: "keychain-token",
                     expiresAt: Date(timeIntervalSinceNow: 3600))
@@ -818,13 +831,20 @@ struct ClaudeOAuthCredentialsStoreTests {
                     ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeTrackingForTesting()
                 }
 
-                let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                let profileIdentifier = ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                    environment: [:])
+                let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                    profileIdentifier: profileIdentifier)
                 let cachedData = self.makeCredentialsData(
                     accessToken: "cached-token",
                     expiresAt: Date(timeIntervalSinceNow: 3600))
                 KeychainCacheStore.store(
                     key: cacheKey,
-                    entry: ClaudeOAuthCredentialsStore.CacheEntry(data: cachedData, storedAt: Date()))
+                    entry: ClaudeOAuthCredentialsStore.CacheEntry(
+                        data: cachedData,
+                        storedAt: Date(),
+                        owner: .claudeCLI,
+                        profileIdentifier: profileIdentifier))
 
                 let first = try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
                     data: cachedData,
@@ -836,8 +856,6 @@ struct ClaudeOAuthCredentialsStoreTests {
                         try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
                     })
                 #expect(first.accessToken == "cached-token")
-
-                ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeThrottleForTesting()
 
                 let expiredKeychainData = self.makeCredentialsData(
                     accessToken: "expired-keychain-token",
@@ -888,13 +906,20 @@ struct ClaudeOAuthCredentialsStoreTests {
                             ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeTrackingForTesting()
                         }
 
-                        let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                        let profileIdentifier = ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                            environment: [:])
+                        let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                            profileIdentifier: profileIdentifier)
                         let cachedData = self.makeCredentialsData(
                             accessToken: "cached-token",
                             expiresAt: Date(timeIntervalSinceNow: 3600))
                         KeychainCacheStore.store(
                             key: cacheKey,
-                            entry: ClaudeOAuthCredentialsStore.CacheEntry(data: cachedData, storedAt: Date()))
+                            entry: ClaudeOAuthCredentialsStore.CacheEntry(
+                                data: cachedData,
+                                storedAt: Date(),
+                                owner: .claudeCLI,
+                                profileIdentifier: profileIdentifier))
 
                         let first = try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
                             data: cachedData,
@@ -907,7 +932,6 @@ struct ClaudeOAuthCredentialsStoreTests {
                             })
                         #expect(first.accessToken == "cached-token")
 
-                        ClaudeOAuthCredentialsStore._resetClaudeKeychainChangeThrottleForTesting()
                         ClaudeOAuthKeychainAccessGate.recordDenied(now: Date())
 
                         let keychainData = self.makeCredentialsData(
@@ -941,7 +965,7 @@ struct ClaudeOAuthCredentialsStoreTests {
     }
 
     @Test
-    func `sync from claude keychain without prompt respects backoff in background`() {
+    func `sync after delegated refresh respects backoff in background`() {
         ProviderInteractionContext.$current.withValue(.background) {
             KeychainAccessGate.withTaskOverrideForTesting(true) {
                 ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
@@ -960,7 +984,7 @@ struct ClaudeOAuthCredentialsStoreTests {
                     ClaudeOAuthKeychainAccessGate.withDeniedUntilStoreOverrideForTesting(deniedStore) {
                         ClaudeOAuthCredentialsStore.withMutableClaudeKeychainOverrideStoreForTesting(store) {
                             #expect(ClaudeOAuthCredentialsStore
-                                .syncFromClaudeKeychainWithoutPrompt(now: Date()) == false)
+                                .syncFromClaudeKeychainAfterDelegatedRefresh(now: Date()) == false)
                         }
                     }
                 }

@@ -105,7 +105,9 @@ struct ClaudeOAuthCredentialsStoreCLIStorageOwnershipTests {
                     try await ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(fileURL) {
                         try await ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
                             ClaudeOAuthCredentialsStore.invalidateCache()
-                            let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                            let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                                profileIdentifier: ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                                    environment: [:]))
                             defer { KeychainCacheStore.clear(key: cacheKey) }
 
                             let expiredData = self.makeCredentialsData(
@@ -214,12 +216,13 @@ struct ClaudeOAuthCredentialsStoreCLIStorageOwnershipTests {
             try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: tempDir) }
             let fileURL = tempDir.appendingPathComponent("credentials.json")
-            let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
-            defer { KeychainCacheStore.clear(key: cacheKey) }
-
             try await ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
                 try await ClaudeOAuthCredentialsStore.withCredentialsURLOverrideForTesting(fileURL) {
                     try await ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(true) {
+                        let cacheKey = ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                            profileIdentifier: ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                                environment: [:]))
+                        defer { KeychainCacheStore.clear(key: cacheKey) }
                         ClaudeOAuthCredentialsStore.invalidateCache()
                         let expiredData = self.makeCredentialsData(
                             accessToken: "access-before-rotation",
@@ -526,7 +529,7 @@ struct ClaudeOAuthCredentialsStoreCLIStorageOwnershipTests {
     }
 
     @Test
-    func `load record ignores codexbar cache in never prompt mode`() throws {
+    func `never prompt mode still loads codexbar owned cache without reading claude keychain`() throws {
         let service = "com.steipete.codexbar.cache.tests.\(UUID().uuidString)"
         try KeychainCacheStore.withServiceOverrideForTesting(service) {
             KeychainCacheStore.setTestStoreForTesting(true)
@@ -556,8 +559,8 @@ struct ClaudeOAuthCredentialsStoreCLIStorageOwnershipTests {
                                     storedAt: Date(),
                                     owner: .codexbar))
 
-                            do {
-                                _ = try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.never) {
+                            let record = try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                                try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.never) {
                                     try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
                                         data: self.makeCredentialsData(
                                             accessToken: "claude-keychain",
@@ -572,13 +575,10 @@ struct ClaudeOAuthCredentialsStoreCLIStorageOwnershipTests {
                                             allowClaudeKeychainRepairWithoutPrompt: false)
                                     }
                                 }
-                                Issue.record("Expected ClaudeOAuthCredentialsError.notFound")
-                            } catch let error as ClaudeOAuthCredentialsError {
-                                guard case .notFound = error else {
-                                    Issue.record("Expected .notFound, got \(error)")
-                                    return
-                                }
                             }
+                            #expect(record.credentials.accessToken == "codexbar-cache")
+                            #expect(record.owner == .codexbar)
+                            #expect(record.source == .cacheKeychain)
                         }
                     }
                 }

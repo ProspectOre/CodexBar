@@ -30,9 +30,11 @@ struct ClaudeOAuthCredentialsStorePromptPolicyTests {
             }
         }
 
-        // Isolation must ignore a conflicting value in the real application defaults domain.
+        // Isolation must ignore the real application defaults domain, while an explicit defaults
+        // lookup preserves the user's no-foreign-Keychain-read policy.
         #expect(ClaudeOAuthKeychainPromptPreference.storedMode() == .onlyOnUserAction)
         #expect(ClaudeOAuthKeychainPromptPreference.storedMode(userDefaults: defaults) == .never)
+        #expect(defaults.string(forKey: key) == ClaudeOAuthKeychainPromptMode.never.rawValue)
 
         let explicit = ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.always) {
             ClaudeOAuthKeychainPromptPreference.storedMode()

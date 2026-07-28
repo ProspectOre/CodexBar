@@ -654,7 +654,7 @@ struct ClaudeOAuthCredentialsStoreSecurityCLITests {
                                             ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(
                                                 .data(securityData))
                                             {
-                                                ClaudeOAuthCredentialsStore.syncFromClaudeKeychainWithoutPrompt(
+                                                ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh(
                                                     now: Date())
                                             }
                                         }

@@ -92,7 +92,7 @@ struct ClaudeOAuthCredentialsStoreSecurityCLIFallbackPolicyTests {
                                                         .timedOut)
                                                     {
                                                         ClaudeOAuthCredentialsStore
-                                                            .syncFromClaudeKeychainWithoutPrompt(now: Date())
+                                                            .syncFromClaudeKeychainAfterDelegatedRefresh(now: Date())
                                                     }
                                                 }
                                             }

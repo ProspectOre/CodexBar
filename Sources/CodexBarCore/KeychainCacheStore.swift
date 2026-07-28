@@ -100,6 +100,22 @@ public enum KeychainCacheStore {
         }
         guard self.canUseRealKeychain else { return .missing }
         #if os(macOS)
+        // Requesting secret bytes can surface a legacy ACL prompt even when the query carries
+        // `kSecUseAuthenticationUIFail`. Probe attributes first and ask for data only when the
+        // item is already available without interaction.
+        switch KeychainAccessPreflight.checkGenericPassword(
+            service: self.serviceName,
+            account: key.account)
+        {
+        case .allowed:
+            break
+        case .interactionRequired:
+            return .temporarilyUnavailable
+        case .notFound:
+            return .missing
+        case let .failure(status):
+            return self.loadResultForKeychainReadFailure(status: OSStatus(status), key: key)
+        }
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: self.serviceName,
@@ -348,6 +364,15 @@ public enum KeychainCacheStore {
     {
         try self.$loadFailureStatusOverride.withValue(status) {
             try operation()
+        }
+    }
+
+    public static func withLoadFailureStatusOverrideForTesting<T>(
+        _ status: OSStatus?,
+        operation: () async throws -> T) async rethrows -> T
+    {
+        try await self.$loadFailureStatusOverride.withValue(status) {
+            try await operation()
         }
     }
 

@@ -168,6 +168,53 @@ struct KeychainCacheStoreTests {
 
     #if os(macOS)
     @Test
+    func `cache secret read stops when attributes preflight requires interaction`() {
+        let service = "cache-preflight-\(UUID().uuidString)"
+        let key = KeychainCacheStore.Key(category: "test", identifier: UUID().uuidString)
+        let observed = LockIsolated<(String, String?)?>(nil)
+
+        let result: KeychainCacheStore.LoadResult<TestEntry> = KeychainCacheStore.withServiceOverrideForTesting(
+            service)
+        {
+            KeychainAccessGate.withTaskOverrideForTesting(false) {
+                KeychainAccessPreflight.withCheckGenericPasswordOverrideForTesting { candidateService, account in
+                    observed.setValue((candidateService, account))
+                    return .interactionRequired
+                } operation: {
+                    KeychainCacheStore.load(key: key, as: TestEntry.self)
+                }
+            }
+        }
+
+        #expect(observed.value?.0 == service)
+        #expect(observed.value?.1 == key.account)
+        switch result {
+        case .temporarilyUnavailable:
+            break
+        case .found, .missing, .invalid:
+            Issue.record("Expected preflight to block the secret-data query")
+        }
+    }
+
+    @Test
+    func `cache secret read stops when attributes preflight finds no item`() {
+        let key = KeychainCacheStore.Key(category: "test", identifier: UUID().uuidString)
+        let preflight: (String, String?) -> KeychainAccessPreflight.Outcome = { _, _ in .notFound }
+        let result: KeychainCacheStore.LoadResult<TestEntry> = KeychainAccessGate.withTaskOverrideForTesting(false) {
+            KeychainAccessPreflight.withCheckGenericPasswordOverrideForTesting(preflight, operation: {
+                KeychainCacheStore.load(key: key, as: TestEntry.self)
+            })
+        }
+
+        switch result {
+        case .missing:
+            break
+        case .found, .temporarilyUnavailable, .invalid:
+            Issue.record("Expected a missing preflight item to skip the secret-data query")
+        }
+    }
+
+    @Test
     func `interaction not allowed is treated as temporarily unavailable`() {
         let key = KeychainCacheStore.Key(category: "test", identifier: UUID().uuidString)
         let result: KeychainCacheStore.LoadResult<TestEntry> = KeychainCacheStore.loadResultForKeychainReadFailure(

@@ -6,9 +6,13 @@ import Testing
 @Suite(.serialized)
 struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     private struct TestState {
-        let cacheKey = KeychainCacheStore.Key.oauth(provider: .claude)
         let pendingStore: ClaudeOAuthCredentialsStore.PendingCacheClearMemoryStore
         let recorder: ClaudeOAuthCredentialsStore.OAuthCacheOperationRecorder
+
+        var cacheKey: KeychainCacheStore.Key {
+            ClaudeOAuthCredentialsStore.cacheKeyForTesting(
+                profileIdentifier: ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(environment: [:]))
+        }
     }
 
     private func makeCredentialsData(accessToken: String, expiresAt: Date, refreshToken: String? = nil) -> Data {
@@ -36,20 +40,22 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
         let fingerprintStore = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprintStore()
         let state = TestState(pendingStore: pendingStore, recorder: recorder)
 
-        return try KeychainCacheStore.withServiceOverrideForTesting(service) {
-            KeychainCacheStore.setTestStoreForTesting(true)
-            defer { KeychainCacheStore.setTestStoreForTesting(false) }
+        return try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(false) {
+            try KeychainCacheStore.withServiceOverrideForTesting(service) {
+                KeychainCacheStore.setTestStoreForTesting(true)
+                defer { KeychainCacheStore.setTestStoreForTesting(false) }
 
-            return try KeychainAccessGate.withTaskOverrideForTesting(false) {
-                try ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(false) {
-                    try ClaudeOAuthCredentialsStore.withPendingCacheClearStoreOverrideForTesting(pendingStore) {
-                        try ClaudeOAuthCredentialsStore.withOAuthCacheOperationRecorderForTesting(recorder) {
-                            try ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
-                                try ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
-                                    try ClaudeOAuthCredentialsStore
-                                        .withClaudeKeychainFingerprintStoreOverrideForTesting(fingerprintStore) {
-                                            try operation(state)
-                                        }
+                return try KeychainAccessGate.withTaskOverrideForTesting(false) {
+                    try ClaudeOAuthCredentialsStore.withKeychainAccessOverrideForTesting(false) {
+                        try ClaudeOAuthCredentialsStore.withPendingCacheClearStoreOverrideForTesting(pendingStore) {
+                            try ClaudeOAuthCredentialsStore.withOAuthCacheOperationRecorderForTesting(recorder) {
+                                try ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
+                                    try ClaudeOAuthCredentialsStore.withIsolatedCredentialsFileTrackingForTesting {
+                                        try ClaudeOAuthCredentialsStore
+                                            .withClaudeKeychainFingerprintStoreOverrideForTesting(fingerprintStore) {
+                                                try operation(state)
+                                            }
+                                    }
                                 }
                             }
                         }
@@ -124,7 +130,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
-    func `never mode loads the credentials file with zero oauth cache IO`() throws {
+    func `owned cache disabled loads the credentials file with zero oauth cache IO`() throws {
         try self.withTestState { state in
             let fileData = self.makeCredentialsData(
                 accessToken: "file-token",
@@ -148,7 +154,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
-    func `never mode file invalidation records a tombstone without oauth cache IO`() throws {
+    func `owned cache disabled file invalidation records a tombstone without oauth cache IO`() throws {
         try self.withTestState { state in
             let initialData = self.makeCredentialsData(
                 accessToken: "initial-token",
@@ -184,7 +190,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
-    func `never mode has cached credentials ignores stale oauth cache with zero IO`() throws {
+    func `owned cache disabled has cached credentials ignores stale oauth cache with zero IO`() throws {
         try self.withTestState { state in
             try self.withCredentialsFile(data: nil) { _ in
                 self.seedCache(state, accessToken: "cached-token")
@@ -215,9 +221,11 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 let hasCached = KeychainCacheStore.withClearFailureStatusOverrideForTesting(
                     errSecInteractionNotAllowed)
                 {
-                    ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                        ProviderInteractionContext.$current.withValue(.background) {
-                            ClaudeOAuthCredentialsStore.hasCachedCredentials(environment: [:])
+                    ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                        ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                            ProviderInteractionContext.$current.withValue(.background) {
+                                ClaudeOAuthCredentialsStore.hasCachedCredentials(environment: [:])
+                            }
                         }
                     }
                 }
@@ -232,7 +240,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
-    func `leaving never mode clears stale oauth cache before repopulating from file`() throws {
+    func `reenabling owned cache clears stale entry before repopulating from file`() throws {
         try self.withTestState { state in
             let fileData = self.makeCredentialsData(
                 accessToken: "file-token-new",
@@ -249,17 +257,17 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 #expect(state.pendingStore.isPending)
                 #expect(state.recorder.operations.isEmpty)
 
-                let credentials = try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(
-                    .onlyOnUserAction)
-                {
-                    try ProviderInteractionContext.$current.withValue(.background) {
-                        try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                let credentials = try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                    try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                        try ProviderInteractionContext.$current.withValue(.background) {
+                            try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                        }
                     }
                 }
 
                 #expect(credentials.accessToken == "file-token-new")
                 #expect(!state.pendingStore.isPending)
-                #expect(state.recorder.operations == [.clear, .load, .store])
+                #expect(state.recorder.operations == [.clear, .load, .load, .store])
                 let cachedToken = try self.cachedToken(state)
                 #expect(cachedToken == "file-token-new")
             }
@@ -267,7 +275,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
-    func `logout under never mode clears stale oauth cache after access is reenabled`() throws {
+    func `invalidation while owned cache disabled clears stale cache after reenable`() throws {
         try self.withTestState { state in
             try self.withCredentialsFile(data: nil) { _ in
                 self.seedCache(state, accessToken: "cached-token")
@@ -281,9 +289,11 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 #expect(staleToken == "cached-token")
 
                 do {
-                    _ = try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                        try ProviderInteractionContext.$current.withValue(.background) {
-                            try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                    _ = try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                        try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                            try ProviderInteractionContext.$current.withValue(.background) {
+                                try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                            }
                         }
                     }
                     Issue.record("Expected ClaudeOAuthCredentialsError.notFound")
@@ -295,7 +305,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 }
 
                 #expect(!state.pendingStore.isPending)
-                #expect(state.recorder.operations == [.clear, .load])
+                #expect(state.recorder.operations == [.clear, .load, .load])
                 let cachedToken = try self.cachedToken(state)
                 #expect(cachedToken == nil)
             }
@@ -317,9 +327,11 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 let first = try KeychainCacheStore.withClearFailureStatusOverrideForTesting(
                     errSecInteractionNotAllowed)
                 {
-                    try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                        try ProviderInteractionContext.$current.withValue(.background) {
-                            try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                    try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                        try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                            try ProviderInteractionContext.$current.withValue(.background) {
+                                try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                            }
                         }
                     }
                 }
@@ -328,14 +340,16 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 let staleToken = try self.cachedToken(state)
                 #expect(staleToken == "cached-token")
 
-                let second = try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                    try ProviderInteractionContext.$current.withValue(.background) {
-                        try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                let second = try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                    try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                        try ProviderInteractionContext.$current.withValue(.background) {
+                            try ClaudeOAuthCredentialsStore.load(environment: [:], allowKeychainPrompt: false)
+                        }
                     }
                 }
                 #expect(second.accessToken == "file-token-new")
                 #expect(!state.pendingStore.isPending)
-                #expect(state.recorder.operations == [.clear, .clear, .load, .store])
+                #expect(state.recorder.operations == [.clear, .clear, .load, .load, .store])
                 let refreshedToken = try self.cachedToken(state)
                 #expect(refreshedToken == "file-token-new")
             }
@@ -358,13 +372,15 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 let synced = KeychainCacheStore.withStoreFailureStatusOverrideForTesting(
                     errSecInteractionNotAllowed)
                 {
-                    ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                        ProviderInteractionContext.$current.withValue(.userInitiated) {
-                            ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
-                                data: syncData,
-                                fingerprint: nil)
-                            {
-                                ClaudeOAuthCredentialsStore.syncFromClaudeKeychainWithoutPrompt()
+                    ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                        ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
+                            ProviderInteractionContext.$current.withValue(.userInitiated) {
+                                ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                                    data: syncData,
+                                    fingerprint: nil)
+                                {
+                                    ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh()
+                                }
                             }
                         }
                     }
@@ -380,7 +396,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
-    func `replacement store failure after failed clear keeps tombstone and stale cache`() throws {
+    func `failed clear preserves the tombstone and stale cache without replacement`() throws {
         try self.withTestState { state in
             try self.withCredentialsFile(data: nil) { _ in
                 self.seedCache(state, accessToken: "cached-token")
@@ -395,14 +411,14 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 let synced = KeychainCacheStore.withClearFailureStatusOverrideForTesting(
                     errSecInteractionNotAllowed)
                 {
-                    KeychainCacheStore.withStoreFailureStatusOverrideForTesting(errSecInteractionNotAllowed) {
+                    ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
                         ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
                             ProviderInteractionContext.$current.withValue(.userInitiated) {
                                 ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
                                     data: syncData,
                                     fingerprint: nil)
                                 {
-                                    ClaudeOAuthCredentialsStore.syncFromClaudeKeychainWithoutPrompt()
+                                    ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh()
                                 }
                             }
                         }
@@ -411,7 +427,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
 
                 #expect(synced)
                 #expect(state.pendingStore.isPending)
-                #expect(state.recorder.operations == [.clear, .store])
+                #expect(state.recorder.operations == [.clear])
                 let cachedToken = try self.cachedToken(state)
                 #expect(cachedToken == "cached-token")
             }
@@ -552,6 +568,130 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
+    func `profile tombstone leaves other profile transactions untouched`() throws {
+        let domain = "ClaudeOAuthPendingCacheProfilesTests.\(UUID().uuidString)"
+        let key = "pending"
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let userDefaults = try #require(UserDefaults(suiteName: domain))
+        defer {
+            userDefaults.removePersistentDomain(forName: domain)
+            userDefaults.synchronize()
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+
+        let store = ClaudeOAuthPendingCacheClearUserDefaultsStore(
+            domain: domain,
+            key: key,
+            lockURL: tempDirectory.appendingPathComponent("cache.lock"))
+        store.markPending(profileIdentifier: "profile-a")
+
+        #expect(store.isPending(profileIdentifier: "profile-a"))
+        #expect(!store.isPending(profileIdentifier: "profile-b"))
+        store.withCacheTransaction(profileIdentifier: "profile-b") { pending in
+            #expect(!pending)
+        }
+        #expect(store.isPending(profileIdentifier: "profile-a"))
+
+        store.withCacheTransaction(profileIdentifier: "profile-a") { pending in
+            #expect(pending)
+            pending = false
+        }
+        #expect(!store.isPending)
+    }
+
+    @Test
+    func `legacy cleanup tombstone persists for only its migration profile`() throws {
+        let domain = "ClaudeOAuthPendingLegacyCleanupProfilesTests.\(UUID().uuidString)"
+        let key = "pending"
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let userDefaults = try #require(UserDefaults(suiteName: domain))
+        defer {
+            userDefaults.removePersistentDomain(forName: domain)
+            userDefaults.synchronize()
+            try? FileManager.default.removeItem(at: tempDirectory)
+        }
+        let lockURL = tempDirectory.appendingPathComponent("cache.lock")
+        let store = ClaudeOAuthPendingCacheClearUserDefaultsStore(
+            domain: domain,
+            key: key,
+            lockURL: lockURL)
+        store.withCacheTransaction(
+            profileIdentifier: "profile-a",
+            includingLegacyCleanup: { profilePending, legacyCleanupPending in
+                #expect(!profilePending)
+                #expect(!legacyCleanupPending)
+                legacyCleanupPending = true
+            })
+
+        let reloadedStore = ClaudeOAuthPendingCacheClearUserDefaultsStore(
+            domain: domain,
+            key: key,
+            lockURL: lockURL)
+        #expect(reloadedStore.isPending(profileIdentifier: "profile-a"))
+        #expect(!reloadedStore.isPending(profileIdentifier: "profile-b"))
+        reloadedStore.withCacheTransaction(
+            profileIdentifier: "profile-b",
+            includingLegacyCleanup: { profilePending, legacyCleanupPending in
+                #expect(!profilePending)
+                #expect(!legacyCleanupPending)
+            })
+        reloadedStore.withCacheTransaction(
+            profileIdentifier: "profile-a",
+            includingLegacyCleanup: { profilePending, legacyCleanupPending in
+                #expect(!profilePending)
+                #expect(legacyCleanupPending)
+                legacyCleanupPending = false
+            })
+        #expect(!reloadedStore.isPending)
+    }
+
+    @Test
+    func `legacy tombstone clears the legacy cache before profile migration`() throws {
+        try self.withTestState { state in
+            try self.withCredentialsFile(data: nil) { _ in
+                let legacyKey = KeychainCacheStore.Key.oauth(provider: .claude)
+                let legacyStored = ClaudeOAuthCredentialsStore.withOAuthCacheOperationRecorderForTesting(nil) {
+                    KeychainCacheStore.storeResult(
+                        key: legacyKey,
+                        entry: ClaudeOAuthCredentialsStore.CacheEntry(
+                            data: self.makeCredentialsData(
+                                accessToken: "legacy-token",
+                                expiresAt: Date(timeIntervalSinceNow: 3600)),
+                            storedAt: Date()))
+                }
+                #expect(legacyStored)
+                state.pendingStore.markPending()
+
+                do {
+                    _ = try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                        try ClaudeOAuthCredentialsStore.loadRecord(
+                            environment: [:],
+                            allowKeychainPrompt: false,
+                            allowClaudeKeychainRepairWithoutPrompt: false)
+                    }
+                    Issue.record("Expected the cleared legacy cache to leave no credentials")
+                } catch let error as ClaudeOAuthCredentialsError {
+                    guard case .notFound = error else {
+                        Issue.record("Expected .notFound, got \(error)")
+                        return
+                    }
+                }
+
+                #expect(!state.pendingStore.isPending)
+                let legacyLoad = ClaudeOAuthCredentialsStore.withOAuthCacheOperationRecorderForTesting(nil) {
+                    KeychainCacheStore.load(key: legacyKey, as: ClaudeOAuthCredentialsStore.CacheEntry.self)
+                }
+                guard case .missing = legacyLoad else {
+                    Issue.record("Expected the legacy cache to remain deleted")
+                    return
+                }
+            }
+        }
+    }
+
+    @Test
     func `legacy boolean tombstone remains pending until cache resolution`() throws {
         let domain = "ClaudeOAuthPendingCacheLegacyTests.\(UUID().uuidString)"
         let key = "pending"
@@ -609,7 +749,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
     }
 
     @Test
-    func `never mode bypasses oauth cache while preserving experimental security CLI reader`() throws {
+    func `owned cache disabled preserves experimental security CLI reader`() throws {
         try self.withTestState { state in
             try self.withCredentialsFile(data: nil) { _ in
                 self.seedCache(state, accessToken: "cached-token")
@@ -644,20 +784,24 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 #expect(cachedToken == "cached-token")
 
                 do {
-                    _ = try ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
-                        try ClaudeOAuthKeychainReadStrategyPreference.withTaskOverrideForTesting(
-                            .securityCLIExperimental)
-                        {
-                            try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.onlyOnUserAction) {
-                                try ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(.data(nil)) {
-                                    try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
-                                        data: Data(),
-                                        fingerprint: nil)
-                                    {
-                                        try ProviderInteractionContext.$current.withValue(.background) {
-                                            try ClaudeOAuthCredentialsStore.load(
-                                                environment: [:],
-                                                allowKeychainPrompt: false)
+                    _ = try ClaudeOAuthCredentialsStore.withCodexBarOAuthCacheEnabledForTesting(true) {
+                        try ClaudeOAuthCredentialsStore.withIsolatedMemoryCacheForTesting {
+                            try ClaudeOAuthKeychainReadStrategyPreference.withTaskOverrideForTesting(
+                                .securityCLIExperimental)
+                            {
+                                try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(
+                                    .onlyOnUserAction)
+                                {
+                                    try ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(.data(nil)) {
+                                        try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                                            data: Data(),
+                                            fingerprint: nil)
+                                        {
+                                            try ProviderInteractionContext.$current.withValue(.background) {
+                                                try ClaudeOAuthCredentialsStore.load(
+                                                    environment: [:],
+                                                    allowKeychainPrompt: false)
+                                            }
                                         }
                                     }
                                 }
@@ -673,7 +817,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 }
 
                 #expect(!state.pendingStore.isPending)
-                #expect(state.recorder.operations == [.clear, .load])
+                #expect(state.recorder.operations == [.clear, .load, .load])
                 let clearedToken = try self.cachedToken(state)
                 #expect(clearedToken == nil)
 
@@ -694,5 +838,18 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                 #expect(!isMcpOnly)
             }
         }
+    }
+
+    @Test
+    func `persisted never preference keeps foreign keychain reads disabled`() throws {
+        let suiteName = "ClaudeOAuthCredentialsStoreNeverPromptCacheTests.\(UUID().uuidString)"
+        let userDefaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { userDefaults.removePersistentDomain(forName: suiteName) }
+        userDefaults.set(ClaudeOAuthKeychainPromptMode.never.rawValue, forKey: "claudeOAuthKeychainPromptMode")
+
+        #expect(ClaudeOAuthKeychainPromptPreference.storedMode(userDefaults: userDefaults) == .never)
+        #expect(
+            userDefaults.string(forKey: "claudeOAuthKeychainPromptMode")
+                == ClaudeOAuthKeychainPromptMode.never.rawValue)
     }
 }
