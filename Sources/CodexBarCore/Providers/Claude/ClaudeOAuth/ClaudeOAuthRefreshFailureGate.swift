@@ -10,7 +10,6 @@ public enum ClaudeOAuthRefreshFailureGate {
     }
 
     struct AuthFingerprint: Codable, Equatable {
-        let keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint?
         let credentialsFile: String?
     }
 
@@ -35,7 +34,7 @@ public enum ClaudeOAuthRefreshFailureGate {
 
     private static let log = CodexBarLog.logger(LogCategories.claudeUsage)
     private static let minimumCredentialsRecheckInterval: TimeInterval = 15
-    private static let unknownFingerprint = AuthFingerprint(keychain: nil, credentialsFile: nil)
+    private static let unknownFingerprint = AuthFingerprint(credentialsFile: nil)
     private static let transientBaseInterval: TimeInterval = 60 * 5
     private static let transientMaxInterval: TimeInterval = 60 * 60 * 6
     private static let profileKeySeparator = ".profile."
@@ -346,7 +345,6 @@ public enum ClaudeOAuthRefreshFailureGate {
         if let override = self.taskFingerprintProviderOverrideStore { return override.provider() }
         #endif
         return AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.currentClaudeKeychainFingerprintWithoutPromptForAuthGate(),
             credentialsFile: ClaudeOAuthCredentialsStore.currentCredentialsFileFingerprintWithoutPromptForAuthGate(
                 environment: environment))
     }

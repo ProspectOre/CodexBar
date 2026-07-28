@@ -311,5 +311,26 @@ struct KeychainCacheStoreTests {
             executable.path,
         ])
     }
+
+    @Test
+    func `cache preflight authorizes only the invoking executable`() {
+        let root = URL(fileURLWithPath: "/Applications/CodexBar.app")
+        let executable = root.appendingPathComponent("Contents/MacOS/CodexBar")
+        let helper = root.appendingPathComponent("Contents/Helpers/CodexBarCLI")
+
+        let currentPaths = KeychainCacheStore.invokingApplicationPathsForCacheAccess(
+            executableURL: executable,
+            fileExists: { $0 == executable.path })
+
+        #expect(currentPaths == [executable.path])
+        #expect(KeychainAccessPreflight.decryptACLAllowsCurrentProcess(
+            trustedApplicationPaths: [executable.path],
+            promptSelector: [],
+            currentProcessPaths: currentPaths))
+        #expect(!KeychainAccessPreflight.decryptACLAllowsCurrentProcess(
+            trustedApplicationPaths: [helper.path],
+            promptSelector: [],
+            currentProcessPaths: currentPaths))
+    }
     #endif
 }

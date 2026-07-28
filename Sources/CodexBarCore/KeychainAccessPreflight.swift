@@ -240,7 +240,7 @@ public enum KeychainAccessPreflight {
               !acls.isEmpty
         else { return false }
 
-        let currentPaths = KeychainCacheStore.trustedApplicationPathsForCacheAccess()
+        let currentPaths = KeychainCacheStore.invokingApplicationPathsForCacheAccess()
         guard !currentPaths.isEmpty else { return false }
 
         for acl in acls {

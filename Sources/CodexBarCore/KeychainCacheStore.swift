@@ -600,6 +600,16 @@ public enum KeychainCacheStore {
         return paths
     }
 
+    /// The caller that will perform the secret-data operation after preflight. The cache ACL may trust
+    /// multiple first-party executables, but one executable cannot authorize access on another's behalf.
+    static func invokingApplicationPathsForCacheAccess(
+        executableURL: URL? = Bundle.main.executableURL,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> [String]
+    {
+        guard let path = executableURL?.path, !path.isEmpty, fileExists(path) else { return [] }
+        return [path]
+    }
+
     private static func appBundleURL(containing url: URL) -> URL? {
         var current = url.standardizedFileURL
         while current.path != "/" {

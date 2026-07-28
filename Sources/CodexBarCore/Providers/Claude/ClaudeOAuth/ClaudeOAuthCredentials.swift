@@ -59,6 +59,7 @@ public enum ClaudeOAuthCredentialsStore {
     private struct PromptAttemptOutcome {
         let generation: UInt64
         let requestID: UUID?
+        let profileIdentifier: String
         let policy: PromptAttemptPolicy
         let result: PromptAttemptResult
     }
@@ -423,10 +424,13 @@ public enum ClaudeOAuthCredentialsStore {
                     owner: .environment,
                     source: .environment)
             }
+            let profileIdentifier = ClaudeOAuthCredentialsStore.credentialsProfileIdentifier(
+                environment: environment)
             _ = self.invalidateCacheIfCredentialsFileChanged(environment: environment)
             guard let requestID = ProviderRefreshRequestContext.id,
                   let outcome = ClaudeOAuthCredentialsStore.readPromptAttemptOutcome(),
                   outcome.requestID == requestID,
+                  outcome.profileIdentifier == profileIdentifier,
                   outcome.generation == ClaudeOAuthKeychainAccessGate.promptAttemptGeneration(),
                   outcome.policy == PromptAttemptPolicy.current
             else {
@@ -466,6 +470,7 @@ public enum ClaudeOAuthCredentialsStore {
                 let policy = PromptAttemptPolicy.current
                 if currentPromptGeneration != promptGeneration ||
                     (refreshRequestID != nil && outcome?.requestID == refreshRequestID),
+                    outcome?.profileIdentifier == profileIdentifier,
                     outcome?.policy == policy
                 {
                     guard outcome?.generation == currentPromptGeneration else { return nil }
@@ -500,6 +505,7 @@ public enum ClaudeOAuthCredentialsStore {
                     ClaudeOAuthCredentialsStore.writePromptAttemptOutcome(PromptAttemptOutcome(
                         generation: generation,
                         requestID: refreshRequestID,
+                        profileIdentifier: profileIdentifier,
                         policy: policy,
                         result: promptAttemptResult))
                 }

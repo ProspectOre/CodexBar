@@ -28,15 +28,17 @@ struct ClaudeOAuthPromptCoalescingTests {
             self.condition.unlock()
         }
 
-        func beginRead() throws {
+        func beginRead() throws -> Int {
             self.condition.lock()
             defer { self.condition.unlock() }
             self.reads += 1
-            guard self.reads == 1 else { return }
+            let readNumber = self.reads
+            guard readNumber == 1 else { return readNumber }
 
             let deadline = Date(timeIntervalSinceNow: 5)
             while self.entrants < 2, self.condition.wait(until: deadline) {}
             guard self.entrants >= 2 else { throw BarrierError.timedOut }
+            return readNumber
         }
 
         var readCount: Int {
@@ -57,6 +59,38 @@ struct ClaudeOAuthPromptCoalescingTests {
     }
 
     @Test
+    func `concurrent profiles do not replay another profile prompt result`() async throws {
+        let state = ConcurrentPromptReadState()
+        let deniedStore = ClaudeOAuthKeychainAccessGate.DeniedUntilStore()
+        let firstData = self.makeCredentialsData(expiresIn: 3600, accessToken: "profile-prompt-1")
+        let secondData = self.makeCredentialsData(expiresIn: 3600, accessToken: "profile-prompt-2")
+
+        let records = try await self.withPromptEnvironment(
+            state: state,
+            deniedStore: deniedStore,
+            read: {
+                try state.beginRead() == 1 ? firstData : secondData
+            },
+            operation: { loadRecord in
+                try await ProviderRefreshRequestContext.$id.withValue(UUID()) {
+                    async let profileA = ClaudeOAuthCredentialsStore
+                        .withCredentialsProfileIdentifierOverrideForTesting("prompt-profile-a") {
+                            try loadRecord()
+                        }
+                    async let profileB = ClaudeOAuthCredentialsStore
+                        .withCredentialsProfileIdentifierOverrideForTesting("prompt-profile-b") {
+                            try loadRecord()
+                        }
+                    return try await (profileA, profileB)
+                }
+            })
+
+        #expect(state.readCount == 2)
+        #expect(Set([records.0.credentials.accessToken, records.1.credentials.accessToken]) ==
+            Set(["profile-prompt-1", "profile-prompt-2"]))
+    }
+
+    @Test
     func `denial is replayed within one request and a new user request retries`() async throws {
         let state = ConcurrentPromptReadState()
         let deniedStore = ClaudeOAuthKeychainAccessGate.DeniedUntilStore()
@@ -66,7 +100,7 @@ struct ClaudeOAuthPromptCoalescingTests {
             state: state,
             deniedStore: deniedStore,
             read: {
-                try state.beginRead()
+                _ = try state.beginRead()
                 ClaudeOAuthKeychainAccessGate.recordDenied()
                 throw ClaudeOAuthCredentialsError.keychainError(status)
             },
@@ -104,7 +138,7 @@ struct ClaudeOAuthPromptCoalescingTests {
             state: state,
             deniedStore: deniedStore,
             read: {
-                try state.beginRead()
+                _ = try state.beginRead()
                 ClaudeOAuthKeychainAccessGate.recordDenied()
                 throw ClaudeOAuthCredentialsError.keychainError(status)
             },
@@ -139,7 +173,7 @@ struct ClaudeOAuthPromptCoalescingTests {
             state: state,
             deniedStore: deniedStore,
             read: {
-                try state.beginRead()
+                _ = try state.beginRead()
                 if state.readCount == 1 {
                     ClaudeOAuthKeychainAccessGate.recordDenied()
                     throw ClaudeOAuthCredentialsError.keychainError(status)
@@ -175,7 +209,7 @@ struct ClaudeOAuthPromptCoalescingTests {
             state: state,
             deniedStore: deniedStore,
             read: {
-                try state.beginRead()
+                _ = try state.beginRead()
                 return credentialsData
             },
             operation: { loadRecord in
@@ -246,12 +280,15 @@ struct ClaudeOAuthPromptCoalescingTests {
         }
     }
 
-    private func makeCredentialsData(expiresIn: TimeInterval) -> Data {
+    private func makeCredentialsData(
+        expiresIn: TimeInterval,
+        accessToken: String = "shared-interactive-read") -> Data
+    {
         let expiresAt = Int(Date(timeIntervalSinceNow: expiresIn).timeIntervalSince1970 * 1000)
         return Data("""
         {
           "claudeAiOauth": {
-            "accessToken": "shared-interactive-read",
+            "accessToken": "\(accessToken)",
             "expiresAt": \(expiresAt),
             "scopes": ["user:profile"],
             "refreshToken": "refresh"

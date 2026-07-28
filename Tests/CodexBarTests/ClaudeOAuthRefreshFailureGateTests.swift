@@ -17,12 +17,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         ClaudeOAuthRefreshFailureGate.resetForTesting()
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
-        var fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        var fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             fingerprint
         } operation: {
@@ -32,12 +27,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(60)) == false)
 
             // Ensure we do not get unblocked unless fingerprint changes.
-            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-                keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                    modifiedAt: 1,
-                    createdAt: 1,
-                    persistentRefHash: "ref1"),
-                credentialsFile: "file1")
+            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(60 * 4)) == false)
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(60 * 60 * 24)) == false)
         }
@@ -66,12 +56,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
 
         let now = Date(timeIntervalSince1970: 20000)
 
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         try ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
             try ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
                 fingerprint
@@ -113,9 +98,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
             .appendingPathComponent("ClaudeOAuthRefreshFailureGate-custom-\(UUID().uuidString)", isDirectory: true)
         let customEnvironment = ["CLAUDE_CONFIG_DIR": customRoot.path]
         let historicalEnvironment: [String: String] = [:]
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: nil,
-            credentialsFile: "legacy-default-file")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "legacy-default-file")
 
         try ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
             #expect(ClaudeOAuthRefreshFailureGate.profileIdentifierForTesting(
@@ -173,12 +156,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(20)) == false)
 
             // Once fingerprint becomes available, the sentinel differs and we unblock.
-            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-                keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                    modifiedAt: 1,
-                    createdAt: 1,
-                    persistentRefHash: "ref1"),
-                credentialsFile: "file1")
+            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(40)) == true)
         }
     }
@@ -188,12 +166,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         ClaudeOAuthRefreshFailureGate.resetForTesting()
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
-        var fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        var fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             fingerprint
         } operation: {
@@ -201,12 +174,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
             ClaudeOAuthRefreshFailureGate.recordTerminalAuthFailure(now: start)
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(60)) == false)
 
-            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-                keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                    modifiedAt: 2,
-                    createdAt: 2,
-                    persistentRefHash: "ref2"),
-                credentialsFile: "file2")
+            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file2")
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(60 * 2)) == true)
         }
     }
@@ -217,12 +185,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
         var calls = 0
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             calls += 1
             return fingerprint
@@ -250,12 +213,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         ClaudeOAuthRefreshFailureGate.resetForTesting()
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             fingerprint
         } operation: {
@@ -274,12 +232,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         ClaudeOAuthRefreshFailureGate.resetForTesting()
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             fingerprint
         } operation: {
@@ -297,12 +250,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         ClaudeOAuthRefreshFailureGate.resetForTesting()
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             fingerprint
         } operation: {
@@ -320,12 +268,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         ClaudeOAuthRefreshFailureGate.resetForTesting()
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             fingerprint
         } operation: {
@@ -355,12 +298,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
         ClaudeOAuthRefreshFailureGate.resetForTesting()
         defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
 
-        var fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                modifiedAt: 1,
-                createdAt: 1,
-                persistentRefHash: "ref1"),
-            credentialsFile: "file1")
+        var fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file1")
         ClaudeOAuthRefreshFailureGate.withFingerprintProviderOverrideForTesting {
             fingerprint
         } operation: {
@@ -370,15 +308,48 @@ struct ClaudeOAuthRefreshFailureGateTests {
             // Still blocked while timer is active and fingerprint unchanged.
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(20)) == false)
 
-            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-                keychain: ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
-                    modifiedAt: 2,
-                    createdAt: 2,
-                    persistentRefHash: "ref2"),
-                credentialsFile: "file2")
+            fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "file2")
 
             // Even though the 5-minute cooldown window hasn't elapsed, a fingerprint change should unblock.
             #expect(ClaudeOAuthRefreshFailureGate.shouldAttempt(now: start.addingTimeInterval(40)) == true)
+        }
+    }
+
+    @Test
+    func `global Claude keychain changes do not unblock a selected profile`() {
+        ClaudeOAuthRefreshFailureGate.resetForTesting()
+        defer { ClaudeOAuthRefreshFailureGate.resetForTesting() }
+
+        let profileRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClaudeOAuthRefreshFailureGate-keychain-\(UUID().uuidString)", isDirectory: true)
+        let environment = [ClaudeConfigPaths.configDirectoryEnvironmentKey: profileRoot.path]
+        let firstGlobalFingerprint = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
+            modifiedAt: 1,
+            createdAt: 1,
+            persistentRefHash: "global-a")
+        let secondGlobalFingerprint = ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint(
+            modifiedAt: 2,
+            createdAt: 2,
+            persistentRefHash: "global-b")
+        let start = Date(timeIntervalSince1970: 85000)
+
+        ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
+            ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                data: nil,
+                fingerprint: firstGlobalFingerprint)
+            {
+                ClaudeOAuthRefreshFailureGate.recordTerminalAuthFailure(
+                    environment: environment,
+                    now: start)
+            }
+            ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
+                data: nil,
+                fingerprint: secondGlobalFingerprint)
+            {
+                #expect(!ClaudeOAuthRefreshFailureGate.shouldAttempt(
+                    environment: environment,
+                    now: start.addingTimeInterval(20)))
+            }
         }
     }
 
@@ -391,9 +362,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
             .appendingPathComponent("ClaudeOAuthRefreshFailureGate-home-\(UUID().uuidString)", isDirectory: true)
         let profileA = ["HOME": root.appendingPathComponent("a", isDirectory: true).path]
         let profileB = ["HOME": root.appendingPathComponent("b", isDirectory: true).path]
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: nil,
-            credentialsFile: "unchanged")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "unchanged")
         let start = Date(timeIntervalSince1970: 90000)
 
         ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
@@ -444,9 +413,7 @@ struct ClaudeOAuthRefreshFailureGateTests {
             "HOME": #require(profileA["HOME"]),
             ClaudeConfigPaths.secureStorageDirectoryEnvironmentKey: otherSecureRoot,
         ]
-        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(
-            keychain: nil,
-            credentialsFile: "unchanged")
+        let fingerprint = ClaudeOAuthRefreshFailureGate.AuthFingerprint(credentialsFile: "unchanged")
         let start = Date(timeIntervalSince1970: 100_000)
 
         ClaudeOAuthCredentialsStore.withEnvironmentCredentialsURLForTesting {
