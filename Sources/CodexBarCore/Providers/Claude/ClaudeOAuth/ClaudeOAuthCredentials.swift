@@ -2466,7 +2466,10 @@ public enum ClaudeOAuthCredentialsStore {
         }
         #endif
 
-        return !KeychainAccessGate.isDisabled
+        // Claude Code owns `Claude Code-credentials` and rewrites the item during token refreshes. That rewrite
+        // replaces its ACL, so any permission granted to CodexBar is inherently temporary and causes recurring
+        // macOS password dialogs. Production CodexBar therefore never reads the foreign item, with or without UI.
+        return false
     }
 
     #if DEBUG
@@ -2524,9 +2527,7 @@ public enum ClaudeOAuthCredentialsStore {
         guard self.keychainAccessAllowed else { return false }
         switch mode {
         case .never:
-            // `.never` means "no interactive prompts", not "no Keychain access at all": a guaranteed
-            // no-UI read can still repair a missing credentials file without surfacing a system prompt.
-            return !allowKeychainPrompt
+            return false
         case .onlyOnUserAction:
             return ProviderInteractionContext.current == .userInitiated
         case .always: return true

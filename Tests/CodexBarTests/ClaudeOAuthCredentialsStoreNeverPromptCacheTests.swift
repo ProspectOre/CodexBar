@@ -760,14 +760,20 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                     expiresAt: Date(timeIntervalSinceNow: 3600),
                     refreshToken: "security-cli-refresh-token")
 
+                final class ReadCounter: @unchecked Sendable {
+                    var hits = 0
+                }
+                let securityReadCalls = ReadCounter()
+
                 let error = #expect(throws: ClaudeOAuthCredentialsError.self) {
                     try ClaudeOAuthKeychainReadStrategyPreference.withTaskOverrideForTesting(
                         .securityCLIExperimental)
                     {
                         try ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(.never) {
-                            try ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(
-                                .data(securityData))
-                            {
+                            try ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(.dynamic { _ in
+                                securityReadCalls.hits += 1
+                                return securityData
+                            }) {
                                 try ClaudeOAuthCredentialsStore.withClaudeKeychainOverridesForTesting(
                                     data: securityData,
                                     fingerprint: nil)
@@ -786,6 +792,7 @@ struct ClaudeOAuthCredentialsStoreNeverPromptCacheTests {
                     Issue.record("Expected .notFound, got \(String(describing: error))")
                     return
                 }
+                #expect(securityReadCalls.hits == 0)
                 #expect(state.recorder.operations.isEmpty)
                 #expect(!state.pendingStore.isPending)
                 let cachedToken = try self.cachedToken(state)
