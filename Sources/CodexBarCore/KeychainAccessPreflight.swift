@@ -1,4 +1,6 @@
 #if os(macOS)
+import Darwin
+import Foundation
 import LocalAuthentication
 import Security
 #endif
@@ -143,6 +145,14 @@ public enum KeychainAccessPreflight {
         let status = KeychainSecurity.copyMatching(query as CFDictionary, &result)
         switch status {
         case errSecSuccess:
+            guard let item = self.keychainItem(fromPreflightResult: result),
+                  self.decryptACLAllowsCurrentProcess(item: item)
+            else {
+                self.log.info(
+                    "Keychain preflight requires interaction for the current process",
+                    metadata: ["service": service])
+                return .interactionRequired
+            }
             self.log.debug("Keychain preflight allowed", metadata: ["service": service])
             return .allowed
         case errSecItemNotFound:
@@ -173,15 +183,131 @@ public enum KeychainAccessPreflight {
             kSecAttrService as String: service,
             kSecMatchLimit as String: kSecMatchLimitOne,
             // Preflight should never trigger UI. Avoid requesting the secret payload (`kSecReturnData`) because
-            // some macOS configurations have been observed to show the legacy keychain prompt unless the query
-            // is strictly non-interactive.
+            // some macOS configurations have been observed to show the legacy keychain prompt even with UI-fail.
+            // The item reference lets us inspect its decrypt ACL before deciding whether a data query is safe.
             kSecReturnAttributes as String: true,
+            kSecReturnRef as String: true,
         ]
         KeychainNoUIQuery.apply(to: &query)
         if let account {
             query[kSecAttrAccount as String] = account
         }
         return query
+    }
+
+    static func decryptACLAllowsCurrentProcess(
+        trustedApplicationPaths: [String]?,
+        promptSelector: SecKeychainPromptSelector,
+        currentProcessPaths: [String]) -> Bool
+    {
+        // Any non-zero selector can require authentication based on the caller's signature state.
+        // A background preflight cannot prove that condition safe, so fail closed.
+        guard promptSelector.rawValue == 0 else { return false }
+        guard let trustedApplicationPaths else { return true }
+        guard !trustedApplicationPaths.isEmpty else { return false }
+
+        let trusted = Set(trustedApplicationPaths.map(self.normalizedPath))
+        return currentProcessPaths.lazy.map(self.normalizedPath).contains(where: trusted.contains)
+    }
+
+    private static func keychainItem(fromPreflightResult result: AnyObject?) -> SecKeychainItem? {
+        guard let attributes = result as? [String: Any],
+              let value = attributes[kSecValueRef as String]
+        else { return nil }
+        return unsafeDowncast(value as AnyObject, to: SecKeychainItem.self)
+    }
+
+    private static func decryptACLAllowsCurrentProcess(item: SecKeychainItem) -> Bool {
+        guard let copyItemAccess = self.securityFunction(
+            named: "SecKeychainItemCopyAccess",
+            as: SecKeychainItemCopyAccessFunction.self),
+            let copyMatchingACLs = self.securityFunction(
+                named: "SecAccessCopyMatchingACLList",
+                as: SecAccessCopyMatchingACLListFunction.self),
+            let copyACLContents = self.securityFunction(
+                named: "SecACLCopyContents",
+                as: SecACLCopyContentsFunction.self),
+            let copyTrustedApplicationData = self.securityFunction(
+                named: "SecTrustedApplicationCopyData",
+                as: SecTrustedApplicationCopyDataFunction.self)
+        else { return false }
+
+        var access: SecAccess?
+        guard copyItemAccess(item, &access) == errSecSuccess,
+              let access,
+              let rawACLs = copyMatchingACLs(access, kSecACLAuthorizationDecrypt)?.takeRetainedValue(),
+              let acls = rawACLs as? [SecACL],
+              !acls.isEmpty
+        else { return false }
+
+        let currentPaths = KeychainCacheStore.trustedApplicationPathsForCacheAccess()
+        guard !currentPaths.isEmpty else { return false }
+
+        for acl in acls {
+            var applications: CFArray?
+            var description: CFString?
+            var selector = SecKeychainPromptSelector()
+            guard copyACLContents(acl, &applications, &description, &selector) == errSecSuccess else {
+                continue
+            }
+            guard let applications else {
+                if self.decryptACLAllowsCurrentProcess(
+                    trustedApplicationPaths: nil,
+                    promptSelector: selector,
+                    currentProcessPaths: currentPaths)
+                {
+                    return true
+                }
+                continue
+            }
+            guard let trustedApplications = applications as? [SecTrustedApplication] else { continue }
+            let trustedPaths = trustedApplications.compactMap { application -> String? in
+                var data: CFData?
+                guard copyTrustedApplicationData(application, &data) == errSecSuccess,
+                      let data,
+                      let path = String(data: data as Data, encoding: .utf8)
+                else { return nil }
+                return path.trimmingCharacters(in: .controlCharacters)
+            }
+            if self.decryptACLAllowsCurrentProcess(
+                trustedApplicationPaths: trustedPaths,
+                promptSelector: selector,
+                currentProcessPaths: currentPaths)
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    private typealias SecKeychainItemCopyAccessFunction = @convention(c) (
+        SecKeychainItem,
+        UnsafeMutablePointer<SecAccess?>) -> OSStatus
+    private typealias SecAccessCopyMatchingACLListFunction = @convention(c) (
+        SecAccess,
+        CFTypeRef) -> Unmanaged<CFArray>?
+    private typealias SecACLCopyContentsFunction = @convention(c) (
+        SecACL,
+        UnsafeMutablePointer<CFArray?>,
+        UnsafeMutablePointer<CFString?>,
+        UnsafeMutablePointer<SecKeychainPromptSelector>) -> OSStatus
+    private typealias SecTrustedApplicationCopyDataFunction = @convention(c) (
+        SecTrustedApplication,
+        UnsafeMutablePointer<CFData?>) -> OSStatus
+
+    private nonisolated(unsafe) static let securityFrameworkHandle: UnsafeMutableRawPointer? = dlopen(
+        "/System/Library/Frameworks/Security.framework/Security",
+        RTLD_NOW)
+
+    private static func securityFunction<T>(named name: String, as _: T.Type) -> T? {
+        guard let securityFrameworkHandle,
+              let symbol = dlsym(securityFrameworkHandle, name)
+        else { return nil }
+        return unsafeBitCast(symbol, to: T.self)
     }
     #endif
 }

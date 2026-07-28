@@ -45,8 +45,35 @@ struct KeychainNoUIQueryTests {
 
         #expect(query[kSecReturnData as String] == nil)
         #expect(query[kSecReturnAttributes as String] as? Bool == true)
+        #expect(query[kSecReturnRef as String] as? Bool == true)
         #expect((query[kSecUseAuthenticationContext as String] as? LAContext)?.interactionNotAllowed == true)
         #expect((query[kSecUseAuthenticationUI as String] as? String) == self.resolveSecurityUIFailValue())
+    }
+
+    @Test
+    func `decrypt ACL permits only an explicitly trusted current process without a prompt selector`() {
+        let current = "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI"
+
+        #expect(KeychainAccessPreflight.decryptACLAllowsCurrentProcess(
+            trustedApplicationPaths: [current],
+            promptSelector: [],
+            currentProcessPaths: [current]))
+        #expect(!KeychainAccessPreflight.decryptACLAllowsCurrentProcess(
+            trustedApplicationPaths: ["/Applications/Claude.app"],
+            promptSelector: [],
+            currentProcessPaths: [current]))
+        #expect(!KeychainAccessPreflight.decryptACLAllowsCurrentProcess(
+            trustedApplicationPaths: [],
+            promptSelector: [],
+            currentProcessPaths: [current]))
+        #expect(KeychainAccessPreflight.decryptACLAllowsCurrentProcess(
+            trustedApplicationPaths: nil,
+            promptSelector: [],
+            currentProcessPaths: [current]))
+        #expect(!KeychainAccessPreflight.decryptACLAllowsCurrentProcess(
+            trustedApplicationPaths: [current],
+            promptSelector: .init(rawValue: 1),
+            currentProcessPaths: [current]))
     }
 
     @Test

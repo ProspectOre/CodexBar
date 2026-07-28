@@ -176,12 +176,14 @@ struct KeychainCacheStoreTests {
         let result: KeychainCacheStore.LoadResult<TestEntry> = KeychainCacheStore.withServiceOverrideForTesting(
             service)
         {
-            KeychainAccessGate.withTaskOverrideForTesting(false) {
-                KeychainAccessPreflight.withCheckGenericPasswordOverrideForTesting { candidateService, account in
-                    observed.setValue((candidateService, account))
-                    return .interactionRequired
-                } operation: {
-                    KeychainCacheStore.load(key: key, as: TestEntry.self)
+            KeychainCacheStore.withRealKeychainPathForTesting {
+                KeychainAccessGate.withTaskOverrideForTesting(false) {
+                    KeychainAccessPreflight.withCheckGenericPasswordOverrideForTesting { candidateService, account in
+                        observed.setValue((candidateService, account))
+                        return .interactionRequired
+                    } operation: {
+                        KeychainCacheStore.load(key: key, as: TestEntry.self)
+                    }
                 }
             }
         }
@@ -200,10 +202,12 @@ struct KeychainCacheStoreTests {
     func `cache secret read stops when attributes preflight finds no item`() {
         let key = KeychainCacheStore.Key(category: "test", identifier: UUID().uuidString)
         let preflight: (String, String?) -> KeychainAccessPreflight.Outcome = { _, _ in .notFound }
-        let result: KeychainCacheStore.LoadResult<TestEntry> = KeychainAccessGate.withTaskOverrideForTesting(false) {
-            KeychainAccessPreflight.withCheckGenericPasswordOverrideForTesting(preflight, operation: {
-                KeychainCacheStore.load(key: key, as: TestEntry.self)
-            })
+        let result: KeychainCacheStore.LoadResult<TestEntry> = KeychainCacheStore.withRealKeychainPathForTesting {
+            KeychainAccessGate.withTaskOverrideForTesting(false) {
+                KeychainAccessPreflight.withCheckGenericPasswordOverrideForTesting(preflight, operation: {
+                    KeychainCacheStore.load(key: key, as: TestEntry.self)
+                })
+            }
         }
 
         switch result {
@@ -212,6 +216,27 @@ struct KeychainCacheStoreTests {
         case .found, .temporarilyUnavailable, .invalid:
             Issue.record("Expected a missing preflight item to skip the secret-data query")
         }
+    }
+
+    @Test
+    func `cache store and clear stop when decrypt ACL requires interaction`() {
+        let key = KeychainCacheStore.Key(category: "test", identifier: UUID().uuidString)
+        let entry = TestEntry(value: "blocked", storedAt: Date(timeIntervalSince1970: 0))
+        let recorder = KeychainCacheStore.OperationRecorder()
+        let preflight: (String, String?) -> KeychainAccessPreflight.Outcome = { _, _ in .interactionRequired }
+
+        KeychainCacheStore.withRealKeychainPathForTesting {
+            KeychainAccessGate.withTaskOverrideForTesting(false) {
+                KeychainCacheStore.withOperationRecorderForTesting(recorder) {
+                    KeychainAccessPreflight.withCheckGenericPasswordOverrideForTesting(preflight) {
+                        #expect(KeychainCacheStore.storeResult(key: key, entry: entry) == false)
+                        #expect(KeychainCacheStore.clearResult(key: key) == .failed)
+                    }
+                }
+            }
+        }
+
+        #expect(recorder.operations == [.store, .clear])
     }
 
     @Test

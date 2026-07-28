@@ -43,6 +43,7 @@ public enum KeychainCacheStore {
     private static let cacheLabel = "CodexBar Cache"
     @TaskLocal private static var serviceOverride: String?
     @TaskLocal private static var forceImplicitTestStore = false
+    @TaskLocal private static var forceRealKeychainPath = false
     #if DEBUG
     @TaskLocal private static var operationRecorder: OperationRecorder?
 
@@ -95,7 +96,9 @@ public enum KeychainCacheStore {
             return self.loadResultForKeychainReadFailure(status: status, key: key)
         }
         #endif
-        if let testResult = loadFromTestStore(key: key, as: type) {
+        if !self.forceRealKeychainPath,
+           let testResult = loadFromTestStore(key: key, as: type)
+        {
             return testResult
         }
         guard self.canUseRealKeychain else { return .missing }
@@ -162,7 +165,9 @@ public enum KeychainCacheStore {
             return false
         }
         #endif
-        if let stored = self.storeInTestStore(key: key, entry: entry) {
+        if !self.forceRealKeychainPath,
+           let stored = self.storeInTestStore(key: key, entry: entry)
+        {
             return stored
         }
         guard self.canUseRealKeychain else { return false }
@@ -173,6 +178,20 @@ public enum KeychainCacheStore {
             return false
         }
 
+        let preflight = KeychainAccessPreflight.checkGenericPassword(
+            service: self.serviceName,
+            account: key.account)
+        switch preflight {
+        case .allowed, .notFound:
+            break
+        case .interactionRequired:
+            self.log.info("Keychain cache store requires interaction (\(key.account)); skipping")
+            return false
+        case let .failure(status):
+            self.log.error("Keychain cache store preflight failed (\(key.account)): \(status)")
+            return false
+        }
+
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: self.serviceName,
@@ -180,15 +199,17 @@ public enum KeychainCacheStore {
         ]
         KeychainNoUIQuery.apply(to: &query)
 
-        let updateStatus = KeychainSecurity.update(
-            query as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary)
-        if updateStatus == errSecSuccess {
-            return true
-        }
-        if updateStatus != errSecItemNotFound {
-            self.log.error("Keychain cache update failed (\(key.account)): \(updateStatus)")
-            return false
+        if case .allowed = preflight {
+            let updateStatus = KeychainSecurity.update(
+                query as CFDictionary,
+                [kSecValueData as String: data] as CFDictionary)
+            if updateStatus == errSecSuccess {
+                return true
+            }
+            if updateStatus != errSecItemNotFound {
+                self.log.error("Keychain cache update failed (\(key.account)): \(updateStatus)")
+                return false
+            }
         }
 
         var addQuery = query
@@ -200,6 +221,17 @@ public enum KeychainCacheStore {
         }
 
         let addStatus = KeychainSecurity.add(addQuery as CFDictionary, nil)
+        if addStatus == errSecDuplicateItem {
+            // Another first-party process may have inserted the same cache item after our missing preflight.
+            // Revalidate its ACL before resolving the benign race with an update.
+            guard case .allowed = KeychainAccessPreflight.checkGenericPassword(
+                service: self.serviceName,
+                account: key.account)
+            else { return false }
+            return KeychainSecurity.update(
+                query as CFDictionary,
+                [kSecValueData as String: data] as CFDictionary) == errSecSuccess
+        }
         if addStatus != errSecSuccess {
             self.log.error("Keychain cache add failed (\(key.account)): \(addStatus)")
         }
@@ -223,11 +255,28 @@ public enum KeychainCacheStore {
             return self.clearResultForKeychainDeleteStatus(status, key: key)
         }
         #endif
-        if let removed = self.clearTestStore(key: key) {
+        if !self.forceRealKeychainPath,
+           let removed = self.clearTestStore(key: key)
+        {
             return removed ? .removed : .missing
         }
         guard self.canUseRealKeychain else { return .failed }
         #if os(macOS)
+        switch KeychainAccessPreflight.checkGenericPassword(
+            service: self.serviceName,
+            account: key.account)
+        {
+        case .allowed:
+            break
+        case .notFound:
+            return .missing
+        case .interactionRequired:
+            self.log.info("Keychain cache delete requires interaction (\(key.account)); skipping")
+            return .failed
+        case let .failure(status):
+            self.log.error("Keychain cache delete preflight failed (\(key.account)): \(status)")
+            return .failed
+        }
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: self.serviceName,
@@ -255,7 +304,9 @@ public enum KeychainCacheStore {
             return self.keysResultForKeychainStatus(status, category: category, result: nil)
         }
         #endif
-        if let keys = self.keysFromTestStore(category: category) {
+        if !self.forceRealKeychainPath,
+           let keys = self.keysFromTestStore(category: category)
+        {
             return .found(keys)
         }
         guard self.canUseRealKeychain else { return .failed }
@@ -326,6 +377,14 @@ public enum KeychainCacheStore {
     }
 
     #if DEBUG
+    static func withRealKeychainPathForTesting<T>(
+        operation: () throws -> T) rethrows -> T
+    {
+        try self.$forceRealKeychainPath.withValue(true) {
+            try operation()
+        }
+    }
+
     static func withOperationRecorderForTesting<T>(
         _ recorder: OperationRecorder?,
         operation: () throws -> T) rethrows -> T
