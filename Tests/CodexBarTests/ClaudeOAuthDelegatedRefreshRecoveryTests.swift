@@ -237,13 +237,15 @@ struct ClaudeOAuthDelegatedRefreshRecoveryTests {
                                     Date,
                                     TimeInterval,
                                     [String: String]) async -> ClaudeOAuthDelegatedRefreshCoordinator.Outcome)? =
-                                    { _, _, _ in
+                                    { _, _, environment in
                                         // Simulate Claude CLI writing fresh credentials after the delegated refresh
                                         // touch.
                                         keychainOverrideStore.data = freshData
                                         keychainOverrideStore.fingerprint = stubFingerprint
                                         _ = await delegatedCounter.increment()
-                                        return .attemptedSucceeded
+                                        let didSync = ClaudeOAuthCredentialsStore
+                                            .syncFromClaudeKeychainAfterDelegatedRefresh(environment: environment)
+                                        return didSync ? .attemptedSucceededAndSynced : .attemptedSucceeded
                                     }
 
                                 let snapshot = try await ClaudeOAuthKeychainPromptPreference

@@ -169,7 +169,9 @@ struct ClaudeUsageDelegatedRefreshEnvironmentTests {
         let delegatedOverride: (@Sendable (Date, TimeInterval, [String: String]) async
             -> ClaudeOAuthDelegatedRefreshCoordinator.Outcome)? = { _, _, environment in
             #expect(environment == environmentA)
-            return .attemptedSucceeded
+            let didSync = ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh(
+                environment: environment)
+            return didSync ? .attemptedSucceededAndSynced : .attemptedSucceeded
         }
         let fetcher = ClaudeUsageFetcher(
             browserDetection: BrowserDetection(cacheTTL: 0),

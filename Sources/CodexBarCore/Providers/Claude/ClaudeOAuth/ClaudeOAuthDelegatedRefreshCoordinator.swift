@@ -23,6 +23,7 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
         case skippedByPromptPolicy
         case cliUnavailable
         case attemptedSucceeded
+        case attemptedSucceededAndSynced
         case attemptedFailed(String)
     }
 
@@ -71,7 +72,7 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
             switch outcome {
             case .attemptedFailed, .skippedByCooldown, .skippedByPromptPolicy, .cliUnavailable:
                 return await self.attempt(now: now, timeout: timeout, environment: environment)
-            case .attemptedSucceeded:
+            case .attemptedSucceeded, .attemptedSucceededAndSynced:
                 return outcome
             }
         case let .joinDifferentProfileThenRetry(id, task, state, joinedProfileIdentifier):
@@ -108,6 +109,7 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
         let cliAvailableOverride: Bool?
         let touchAuthPathOverride: (@Sendable (TimeInterval, [String: String]) async throws -> Void)?
         let keychainFingerprintOverride: (@Sendable () -> ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint?)?
+        let syncAfterRefreshOverride: (@Sendable (Date, [String: String]) -> Bool)?
         #endif
     }
 
@@ -155,7 +157,8 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
             keychainAccessDisabled: KeychainAccessGate.isDisabled,
             cliAvailableOverride: self.cliAvailableOverrideForTesting,
             touchAuthPathOverride: self.touchAuthPathOverrideForTesting,
-            keychainFingerprintOverride: self.keychainFingerprintOverrideForTesting)
+            keychainFingerprintOverride: self.keychainFingerprintOverrideForTesting,
+            syncAfterRefreshOverride: self.syncAfterRefreshOverrideForTesting)
         let securityCLIReadOverride = ClaudeOAuthCredentialsStore.currentSecurityCLIReadOverrideForTesting()
         #else
         let readStrategy = ClaudeOAuthKeychainReadStrategyPreference.current()
@@ -170,23 +173,27 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
         #endif
         let task = Task.detached(priority: .utility) {
             #if DEBUG
-            return await ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(configuration.promptMode) {
-                await ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(securityCLIReadOverride) {
-                    await self.performAttempt(
-                        now: now,
-                        timeout: timeout,
-                        configuration: configuration,
-                        profileIdentifier: profileIdentifier,
-                        state: state)
+            return await ProviderInteractionContext.$current.withValue(configuration.interaction) {
+                await ClaudeOAuthKeychainPromptPreference.withTaskOverrideForTesting(configuration.promptMode) {
+                    await ClaudeOAuthCredentialsStore.withSecurityCLIReadOverrideForTesting(securityCLIReadOverride) {
+                        await self.performAttempt(
+                            now: now,
+                            timeout: timeout,
+                            configuration: configuration,
+                            profileIdentifier: profileIdentifier,
+                            state: state)
+                    }
                 }
             }
             #else
-            await self.performAttempt(
-                now: now,
-                timeout: timeout,
-                configuration: configuration,
-                profileIdentifier: profileIdentifier,
-                state: state)
+            await ProviderInteractionContext.$current.withValue(configuration.interaction) {
+                await self.performAttempt(
+                    now: now,
+                    timeout: timeout,
+                    configuration: configuration,
+                    profileIdentifier: profileIdentifier,
+                    state: state)
+            }
             #endif
         }
         state.inFlightAttemptID = attemptID
@@ -276,8 +283,14 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
                 cooldown: self.defaultCooldownInterval,
                 profileIdentifier: profileIdentifier,
                 state: state)
-            self.log.info("Claude OAuth delegated refresh touch succeeded")
-            return .attemptedSucceeded
+            let didSyncSilently = self.syncAfterSuccessfulRefresh(
+                now: Date(),
+                configuration: configuration,
+                state: state)
+            self.log.info(
+                "Claude OAuth delegated refresh touch succeeded",
+                metadata: ["didSyncSilently": "\(didSyncSilently)"])
+            return didSyncSilently ? .attemptedSucceededAndSynced : .attemptedSucceeded
         }
 
         self.recordAttempt(
@@ -296,6 +309,31 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
 
         self.log.warning("Claude OAuth delegated refresh touch did not update Claude keychain")
         return .attemptedFailed("Claude keychain did not update after Claude CLI touch.")
+    }
+
+    private static func syncAfterSuccessfulRefresh(
+        now: Date,
+        configuration: AttemptConfiguration,
+        state: AttemptStateStorage) -> Bool
+    {
+        #if DEBUG
+        if let override = configuration.syncAfterRefreshOverride {
+            return override(now, configuration.environment)
+        }
+        // Unit tests use isolated coordinator state and synthetic Keychain observations. Never let an
+        // unconfigured test fall through to the real Claude or CodexBar Keychain items.
+        if !state.persistsCooldown {
+            return false
+        }
+        #endif
+
+        // This invalidation and the following global-Keychain read must remain inside the serialized attempt.
+        // Another credentials profile cannot start its Claude CLI touch until this task returns.
+        _ = ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged(
+            environment: configuration.environment)
+        return ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh(
+            now: now,
+            environment: configuration.environment)
     }
 
     public static func isInCooldown(
@@ -633,6 +671,7 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
         [String: String]) async throws -> Void)?
     @TaskLocal static var keychainFingerprintOverrideForTesting: (@Sendable () -> ClaudeOAuthCredentialsStore
         .ClaudeKeychainFingerprint?)?
+    @TaskLocal static var syncAfterRefreshOverrideForTesting: (@Sendable (Date, [String: String]) -> Bool)?
     @TaskLocal static var userInitiatedBackgroundJoinObserverForTesting: (@Sendable () -> Void)?
 
     static func withCLIAvailableOverrideForTesting<T>(
@@ -658,6 +697,15 @@ public enum ClaudeOAuthDelegatedRefreshCoordinator {
         operation: () async throws -> T) async rethrows -> T
     {
         try await self.$keychainFingerprintOverrideForTesting.withValue(override) {
+            try await operation()
+        }
+    }
+
+    static func withSyncAfterRefreshOverrideForTesting<T>(
+        _ override: (@Sendable (Date, [String: String]) -> Bool)?,
+        operation: () async throws -> T) async rethrows -> T
+    {
+        try await self.$syncAfterRefreshOverrideForTesting.withValue(override) {
             try await operation()
         }
     }

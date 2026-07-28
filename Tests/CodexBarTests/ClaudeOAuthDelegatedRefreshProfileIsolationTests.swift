@@ -42,6 +42,8 @@ struct ClaudeOAuthDelegatedRefreshProfileIsolationTests {
             private let lock = NSLock()
             private var revision = 1
             private var touchedProfiles: [String] = []
+            private var currentKeychainProfile: String?
+            private var cachedKeychainProfileByProfile: [String: String] = [:]
 
             func touch(profile: String) -> Int {
                 self.lock.withLock {
@@ -50,8 +52,19 @@ struct ClaudeOAuthDelegatedRefreshProfileIsolationTests {
                 }
             }
 
-            func finishTouch() {
-                self.lock.withLock { self.revision += 1 }
+            func finishTouch(profile: String) {
+                self.lock.withLock {
+                    self.currentKeychainProfile = profile
+                    self.revision += 1
+                }
+            }
+
+            func sync(profile: String) -> Bool {
+                self.lock.withLock {
+                    guard let currentKeychainProfile else { return false }
+                    self.cachedKeychainProfileByProfile[profile] = currentKeychainProfile
+                    return true
+                }
             }
 
             func fingerprint() -> ClaudeOAuthCredentialsStore.ClaudeKeychainFingerprint {
@@ -65,6 +78,10 @@ struct ClaudeOAuthDelegatedRefreshProfileIsolationTests {
 
             func profiles() -> [String] {
                 self.lock.withLock { self.touchedProfiles }
+            }
+
+            func cachedKeychainProfile(for profile: String) -> String? {
+                self.lock.withLock { self.cachedKeychainProfileByProfile[profile] }
             }
         }
 
@@ -88,31 +105,36 @@ struct ClaudeOAuthDelegatedRefreshProfileIsolationTests {
                                             await gate.markStarted()
                                             await gate.waitRelease()
                                         }
-                                        state.finishTouch()
+                                        state.finishTouch(profile: profile)
                                     } operation: {
                                         await ClaudeOAuthDelegatedRefreshCoordinator
-                                            .withKeychainFingerprintOverrideForTesting {
-                                                state.fingerprint()
-                                            }
-                                            operation: {
-                                                let first = Task {
-                                                    await ClaudeOAuthDelegatedRefreshCoordinator.attempt(
-                                                        now: now,
-                                                        timeout: 2,
-                                                        environment: environmentA)
-                                                }
-                                                await gate.waitStarted()
-                                                let second = Task {
-                                                    await ClaudeOAuthDelegatedRefreshCoordinator.attempt(
-                                                        now: now,
-                                                        timeout: 2,
-                                                        environment: environmentB)
-                                                }
+                                            .withSyncAfterRefreshOverrideForTesting { _, environment in
+                                                state.sync(profile: environment["CLAUDE_CONFIG_DIR"] ?? "")
+                                            } operation: {
+                                                await ClaudeOAuthDelegatedRefreshCoordinator
+                                                    .withKeychainFingerprintOverrideForTesting {
+                                                        state.fingerprint()
+                                                    }
+                                                    operation: {
+                                                        let first = Task {
+                                                            await ClaudeOAuthDelegatedRefreshCoordinator.attempt(
+                                                                now: now,
+                                                                timeout: 2,
+                                                                environment: environmentA)
+                                                        }
+                                                        await gate.waitStarted()
+                                                        let second = Task {
+                                                            await ClaudeOAuthDelegatedRefreshCoordinator.attempt(
+                                                                now: now,
+                                                                timeout: 2,
+                                                                environment: environmentB)
+                                                        }
 
-                                                await Task.yield()
-                                                #expect(state.profiles() == [profileA])
-                                                await gate.release()
-                                                return await (first.value, second.value)
+                                                        await Task.yield()
+                                                        #expect(state.profiles() == [profileA])
+                                                        await gate.release()
+                                                        return await (first.value, second.value)
+                                                    }
                                             }
                                     }
                             }
@@ -122,8 +144,10 @@ struct ClaudeOAuthDelegatedRefreshProfileIsolationTests {
             }
         }
 
-        #expect(outcomes.0 == .attemptedSucceeded)
-        #expect(outcomes.1 == .attemptedSucceeded)
+        #expect(outcomes.0 == .attemptedSucceededAndSynced)
+        #expect(outcomes.1 == .attemptedSucceededAndSynced)
         #expect(state.profiles() == [profileA, profileB])
+        #expect(state.cachedKeychainProfile(for: profileA) == profileA)
+        #expect(state.cachedKeychainProfile(for: profileB) == profileB)
     }
 }

@@ -388,20 +388,18 @@ public struct ClaudeUsageFetcher: ClaudeUsageFetching, Sendable {
                         throw ClaudeUsageError.oauthFailed(
                             "Claude OAuth token expired; delegated refresh is unavailable (outcome="
                                 + "\(ClaudeUsageFetcher.delegatedRefreshOutcomeLabel(delegatedOutcome))).")
-                    case .attemptedSucceeded, .attemptedFailed:
+                    case .attemptedSucceeded, .attemptedSucceededAndSynced, .attemptedFailed:
                         break
                     }
                 }
 
                 try Task.checkCancellation()
 
-                _ = ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged(
-                    environment: self.fetcher.environment)
-
-                let didSyncSilently = delegatedOutcome == .attemptedSucceeded
-                    && ClaudeOAuthCredentialsStore.syncFromClaudeKeychainAfterDelegatedRefresh(
-                        now: Date(),
+                let didSyncSilently = delegatedOutcome == .attemptedSucceededAndSynced
+                if !didSyncSilently {
+                    _ = ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged(
                         environment: self.fetcher.environment)
+                }
 
                 let promptPolicy = ClaudeUsageFetcher.currentClaudeOAuthInteractivePromptPolicy()
                 ClaudeUsageFetcher.logDeferredBackgroundDelegatedRecoveryIfNeeded(
@@ -917,6 +915,8 @@ extension ClaudeUsageFetcher {
             "cliUnavailable"
         case .attemptedSucceeded:
             "attemptedSucceeded"
+        case .attemptedSucceededAndSynced:
+            "attemptedSucceededAndSynced"
         case .attemptedFailed:
             "attemptedFailed"
         }
@@ -944,6 +944,9 @@ extension ClaudeUsageFetcher {
                 + "Install/configure `claude`, or run `claude login`."
         case .attemptedSucceeded:
             return "Claude OAuth token is still unavailable after delegated Claude CLI refresh. "
+                + "Run `claude login`, then retry."
+        case .attemptedSucceededAndSynced:
+            return "Claude OAuth token is still unavailable after delegated Claude CLI refresh and cache sync. "
                 + "Run `claude login`, then retry."
         case let .attemptedFailed(message):
             return "Claude OAuth token expired and delegated Claude CLI refresh failed: \(message). "
