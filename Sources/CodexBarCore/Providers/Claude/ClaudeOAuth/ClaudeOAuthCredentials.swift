@@ -3044,8 +3044,11 @@ extension ClaudeOAuthCredentialsStore {
     /// After delegated Claude CLI refresh, re-load the Claude keychain entry without prompting and sync it into
     /// CodexBar's caches. This is used to avoid triggering a second OS keychain dialog during the OAuth retry.
     @discardableResult
-    static func syncFromClaudeKeychainWithoutPrompt(now: Date = Date()) -> Bool {
-        let profileIdentifier = self.credentialsProfileIdentifier(environment: ProcessInfo.processInfo.environment)
+    static func syncFromClaudeKeychainWithoutPrompt(
+        now: Date = Date(),
+        environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool
+    {
+        let profileIdentifier = self.credentialsProfileIdentifier(environment: environment)
         return Recovery(
             context: self.currentCollaboratorContext(),
             profileIdentifier: profileIdentifier).syncFromClaudeKeychainWithoutPrompt(now: now)

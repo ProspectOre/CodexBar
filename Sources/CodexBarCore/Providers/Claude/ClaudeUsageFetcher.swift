@@ -343,7 +343,7 @@ public struct ClaudeUsageFetcher: ClaudeUsageFetching, Sendable {
                 if case .rateLimited = error {
                     throw ClaudeUsageError.oauthFailed(error.localizedDescription)
                 }
-                ClaudeOAuthCredentialsStore.invalidateCache()
+                ClaudeOAuthCredentialsStore.invalidateCache(environment: self.fetcher.environment)
                 if case let .serverError(statusCode, body) = error,
                    statusCode == 403,
                    body?.contains("user:profile") ?? false
@@ -395,10 +395,13 @@ public struct ClaudeUsageFetcher: ClaudeUsageFetching, Sendable {
 
                 try Task.checkCancellation()
 
-                _ = ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged()
+                _ = ClaudeOAuthCredentialsStore.invalidateCacheIfCredentialsFileChanged(
+                    environment: self.fetcher.environment)
 
                 let didSyncSilently = delegatedOutcome == .attemptedSucceeded
-                    && ClaudeOAuthCredentialsStore.syncFromClaudeKeychainWithoutPrompt(now: Date())
+                    && ClaudeOAuthCredentialsStore.syncFromClaudeKeychainWithoutPrompt(
+                        now: Date(),
+                        environment: self.fetcher.environment)
 
                 let promptPolicy = ClaudeUsageFetcher.currentClaudeOAuthInteractivePromptPolicy()
                 ClaudeUsageFetcher.logDeferredBackgroundDelegatedRecoveryIfNeeded(
