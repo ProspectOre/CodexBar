@@ -1,5 +1,8 @@
 # Repository Guidelines
 
+In this workspace, inherit `/Users/alec/Dev/AGENTS.md`; read it first, including
+its native `xcode-tools` preference for Apple docs, builds, and diagnostics.
+
 ## Project Structure & Modules
 - `Sources/CodexBar`: Swift 6 menu bar app (usage/credits probes, icon renderer, settings). Keep changes small and reuse existing helpers.
 - `Tests/CodexBarTests`: XCTest coverage for usage parsing, status probes, icon patterns; mirror new logic with focused tests.
@@ -9,7 +12,7 @@
 ## Build, Test, Run
 - Dev loop: `./Scripts/compile_and_run.sh` kills old instances, runs `swift build` + `swift test`, packages, relaunches `CodexBar.app`, and confirms it stays running.
 - Quick build/test: `swift build` (debug) or `swift build -c release`; `swift test` for the full XCTest suite.
-- Package locally: `./Scripts/package_app.sh` to refresh `CodexBar.app`, then restart the bundle from this checkout with `pkill -x CodexBar || pkill -f CodexBar.app || true; open -n "$PWD/CodexBar.app"`.
+- Package locally: `./Scripts/package_app.sh` to refresh `CodexBar.app`, then restart the bundle from this checkout with `pkill -x CodexBar || pkill -f CodexBar.app || true; (cd "$(git rev-parse --show-toplevel)" && open -n CodexBar.app)`.
 - Release flow: `./Scripts/release.sh`; app metadata lives in `.mac-release.env`, repo build/signing stays in `Scripts/sign-and-notarize.sh`, and validation steps live in `docs/RELEASING.md`.
 
 ## Coding Style & Naming
@@ -31,7 +34,7 @@
 ## Agent Notes
 - Use the provided scripts and package manager (SwiftPM); avoid adding dependencies or tooling without confirmation.
 - Validate UI/runtime behavior against the freshly built bundle; restart via the pkill+open command above to avoid running stale binaries.
-- To guarantee the right bundle is running after a rebuild, use: `pkill -x CodexBar || pkill -f CodexBar.app || true; open -n "$PWD/CodexBar.app"`.
+- To guarantee the right bundle is running after a rebuild, use: `pkill -x CodexBar || pkill -f CodexBar.app || true; (cd "$(git rev-parse --show-toplevel)" && open -n CodexBar.app)`.
 - For CLI-testable provider/parser/settings behavior, use CLI/focused tests instead of `Scripts/package_app.sh` or `./Scripts/compile_and_run.sh`.
 - Run `./Scripts/compile_and_run.sh` only when UI/runtime behavior needs bundle-level validation; it builds, tests, packages, relaunches, and verifies the app stays running.
 - Widget/Tahoe UI issues: use Parallels macOS VM plus screenshots/clicks for autonomous verification.
