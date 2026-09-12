@@ -1,6 +1,6 @@
 ---
 name: qa-test
-description: "CodexBar live QA/e2e testing: run provider usage matrix checks, validate real app config, use Peekaboo for menu proof, use Browser Use/official docs for API spec or logged-in dashboard checks, and handle 1Password credentials safely."
+description: "Run CodexBar live QA and e2e checks against real app/provider surfaces when requested."
 ---
 
 # CodexBar Live QA
