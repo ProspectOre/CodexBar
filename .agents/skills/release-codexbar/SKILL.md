@@ -108,7 +108,7 @@ For Homebrew:
 
 ```bash
 shasum -a 256 CodexBar-macos-universal-<VERSION>.zip
-cd /Users/steipete/Projects/homebrew-tap
+cd <local homebrew-tap checkout>
 python3 .github/scripts/update_formula.py --formula codexbar --tag v<VERSION> --repository steipete/CodexBar --artifact-template 'CodexBarCLI-{tag}-{target}.tar.gz' --target-aliases 'darwin_arm64=macos-arm64,darwin_amd64=macos-x86_64,linux_arm64=linux-aarch64,linux_amd64=linux-x86_64'
 brew fetch --cask --force --retry codexbar
 brew fetch --formula --force --retry steipete/tap/codexbar
